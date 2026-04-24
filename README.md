@@ -130,7 +130,36 @@ The first admin (`riley.schuit@gmail.com`) is bootstrapped automatically — no 
 - CloudFront distribution with two origins (SPA default, `/api/*` → API Gateway)
 - Route 53 A-alias `sharing.schuit.io → CloudFront`
 
-You need the Hosted Zone ID for `schuit.io` and the API Gateway execute-api host (the part before `/dev/` in `ApiEndpoint`).
+### DNS model (read this first)
+
+**You only need the parent `schuit.io` hosted zone** — there is **no** separate
+hosted zone for `sharing.schuit.io`. Subdomains are just records inside the
+parent zone. This stack adds:
+
+1. A temporary CNAME for ACM DNS validation (removed after the cert issues)
+2. A permanent A-alias `sharing.schuit.io → CloudFront`
+
+If `schuit.io` isn't in Route 53 yet:
+
+```bash
+aws route53 create-hosted-zone \
+  --name schuit.io \
+  --caller-reference "$(date +%s)"
+# then point your domain registrar at the 4 nameservers it prints
+```
+
+### Deploy
+
+**Must be deployed in `us-east-1`** — CloudFront requires its ACM cert in that region.
+
+Easiest: use the helper script (auto-discovers the hosted zone ID and API host):
+
+```bash
+cd infrastructure
+./deploy.sh
+```
+
+Or run it manually:
 
 ```bash
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
@@ -145,14 +174,7 @@ aws cloudformation deploy \
       HostedZoneId=$HOSTED_ZONE_ID \
       ApiGatewayDomain=$API_HOST \
   --capabilities CAPABILITY_IAM
-
-aws cloudformation describe-stacks \
-  --region us-east-1 \
-  --stack-name rom-hub-frontend \
-  --query 'Stacks[0].Outputs'
 ```
-
-Important: **CloudFormation must be deployed in `us-east-1`** — CloudFront requires its ACM cert in that region.
 
 Outputs:
 - `SiteBucketName` — the private S3 bucket the SPA lives in

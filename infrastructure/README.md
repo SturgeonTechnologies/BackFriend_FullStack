@@ -9,10 +9,28 @@ CloudFormation template that provisions the `sharing.schuit.io` front door:
   - `/api/*` → API Gateway (CloudFront Function strips `/api` prefix before forwarding)
 - Route 53 A-alias `sharing.schuit.io → CloudFront`
 
+## How DNS works here
+
+> **You don't need a separate Route 53 hosted zone for `sharing.schuit.io`.**
+> Subdomains live as records *inside* the parent zone. This stack uses the
+> existing `schuit.io` hosted zone and adds two things to it:
+>
+> 1. A CNAME created temporarily by ACM to validate the cert (removed automatically after issuance).
+> 2. An A-alias `sharing.schuit.io → CloudFront` (the permanent record).
+>
+> If the `schuit.io` hosted zone doesn't exist yet, create it once:
+> ```bash
+> aws route53 create-hosted-zone \
+>   --name schuit.io \
+>   --caller-reference "$(date +%s)"
+> ```
+> then point your registrar at the four nameservers it prints. That's a
+> one-time setup per root domain, not per subdomain.
+
 ## Prereqs
 
 - Backend deployed (see `../backend/README.md`) — you need the API Gateway host
-- The Route 53 hosted zone for `schuit.io` already exists in this account
+- The Route 53 hosted zone for `schuit.io` already exists in this account (see note above)
 - AWS CLI configured for the same account
 
 ## 1. Gather inputs
@@ -31,6 +49,20 @@ cd ../backend && npx serverless info --stage dev | grep 'ApiEndpoint:'
 ## 2. Deploy
 
 **Must be deployed in `us-east-1`** — CloudFront requires its ACM cert in that region.
+
+### Option A — one-liner via helper script (recommended)
+
+```bash
+cd infrastructure
+./deploy.sh                  # stage=dev
+# or
+STAGE=prod ./deploy.sh
+PROFILE=my-aws-profile ./deploy.sh
+```
+
+`deploy.sh` auto-discovers the parent `schuit.io` hosted zone and the API Gateway host from the already-deployed backend stage, then runs `aws cloudformation deploy` for you.
+
+### Option B — manual
 
 ```bash
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
