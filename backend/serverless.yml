@@ -1,0 +1,292 @@
+service: rom-hub
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 15
+  environment:
+    STAGE: ${self:provider.stage}
+    INVITES_TABLE: !Ref InvitesTable
+    MOUNTS_TABLE: !Ref MountsTable
+    USER_POOL_ID: !Ref UserPool
+    USER_POOL_CLIENT_ID: !Ref UserPoolClient
+    ADMIN_GROUP: admins
+    BOOTSTRAP_ADMIN_EMAILS: ${self:custom.bootstrapAdmins}
+    SHARES_BUCKET: ${self:custom.sharesBucket}
+    SITE_ORIGIN: ${self:custom.siteOrigin.${self:provider.stage}, self:custom.siteOrigin.default}
+  httpApi:
+    cors:
+      allowedOrigins: ${self:custom.allowedOrigins.${self:provider.stage}, self:custom.allowedOrigins.default}
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - DELETE
+        - OPTIONS
+    authorizers:
+      cognito:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+        audience:
+          - !Ref UserPoolClient
+  iam:
+    role:
+      statements:
+        # DynamoDB: invites + mounts
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - !GetAtt InvitesTable.Arn
+            - !GetAtt MountsTable.Arn
+        # S3: the shared bucket we browse into
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+          Resource:
+            - !Sub "arn:aws:s3:::${self:custom.sharesBucket}"
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+          Resource:
+            - !Sub "arn:aws:s3:::${self:custom.sharesBucket}/*"
+        # Cognito admin APIs for group membership + post-auth provisioning
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminAddUserToGroup
+            - cognito-idp:AdminRemoveUserFromGroup
+            - cognito-idp:AdminListGroupsForUser
+            - cognito-idp:AdminGetUser
+          Resource:
+            - !GetAtt UserPool.Arn
+
+custom:
+  # Comma-separated list of emails that are auto-promoted to admins on first sign-in.
+  bootstrapAdmins: "riley.schuit@gmail.com"
+
+  # External S3 bucket we read from (not managed by this stack).
+  sharesBucket: schuit-sharing
+
+  siteOrigin:
+    default: http://localhost:5173
+    dev: http://localhost:5173
+    prod: https://sharing.schuit.io
+
+  allowedOrigins:
+    default:
+      - "http://localhost:5173"
+    dev:
+      - "http://localhost:5173"
+    prod:
+      - "https://sharing.schuit.io"
+
+  # Cognito hosted-UI prefix domain. Must be globally unique within the region.
+  # Final domain: https://${domainPrefix}.auth.${region}.amazoncognito.com
+  cognitoDomainPrefix: ${self:service}-${self:provider.stage}-${aws:accountId}
+
+  # Google OAuth credentials — stored in SSM Parameter Store, NOT in this file.
+  #   aws ssm put-parameter --name /rom-hub/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"
+  #   aws ssm put-parameter --name /rom-hub/${stage}/google/client_secret --type SecureString --value "GOCSPX-..."
+  googleClientId:    ${ssm:/rom-hub/${self:provider.stage}/google/client_id}
+  googleClientSecret: ${ssm:/rom-hub/${self:provider.stage}/google/client_secret}
+
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: true
+    target: node20
+    platform: node
+
+plugins:
+  - serverless-esbuild
+
+package:
+  individually: true
+
+functions:
+  # --- Cognito triggers ---
+  preSignUp:
+    handler: src/handlers/triggers/preSignUp.handler
+    # Wired to the UserPool via the LambdaConfig on the pool resource below.
+
+  postAuth:
+    handler: src/handlers/triggers/postAuth.handler
+
+  # --- Admin: invites ---
+  createInvite:
+    handler: src/handlers/admin/createInvite.handler
+    events:
+      - httpApi: { method: POST, path: /admin/invites, authorizer: { name: cognito } }
+  listInvites:
+    handler: src/handlers/admin/listInvites.handler
+    events:
+      - httpApi: { method: GET, path: /admin/invites, authorizer: { name: cognito } }
+  revokeInvite:
+    handler: src/handlers/admin/revokeInvite.handler
+    events:
+      - httpApi: { method: DELETE, path: "/admin/invites/{email}", authorizer: { name: cognito } }
+
+  # --- Admin: mounts ---
+  createMount:
+    handler: src/handlers/admin/createMount.handler
+    events:
+      - httpApi: { method: POST, path: /admin/mounts, authorizer: { name: cognito } }
+  deleteMount:
+    handler: src/handlers/admin/deleteMount.handler
+    events:
+      - httpApi: { method: DELETE, path: "/admin/mounts/{mountPath}", authorizer: { name: cognito } }
+
+  # --- Authenticated: directory browser ---
+  listMounts:
+    handler: src/handlers/user/listMounts.handler
+    events:
+      - httpApi: { method: GET, path: /mounts, authorizer: { name: cognito } }
+  browseList:
+    handler: src/handlers/user/browseList.handler
+    events:
+      - httpApi: { method: GET, path: "/browse/{mountPath}", authorizer: { name: cognito } }
+  browseDownloadUrl:
+    handler: src/handlers/user/browseDownloadUrl.handler
+    events:
+      - httpApi: { method: GET, path: "/browse/{mountPath}/download-url", authorizer: { name: cognito } }
+
+resources:
+  Resources:
+    # ---------- Cognito ----------
+    UserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:service}-${self:provider.stage}
+        UsernameAttributes: [email]
+        AutoVerifiedAttributes: [email]
+        MfaConfiguration: "OFF"
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: false # federated users are created on-the-fly
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 12
+            RequireLowercase: true
+            RequireUppercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+        Schema:
+          - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+        LambdaConfig:
+          PreSignUp: !GetAtt PreSignUpLambdaFunction.Arn
+          PostAuthentication: !GetAtt PostAuthLambdaFunction.Arn
+
+    PreSignUpInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt PreSignUpLambdaFunction.Arn
+        Principal: cognito-idp.amazonaws.com
+        SourceArn: !GetAtt UserPool.Arn
+
+    PostAuthInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt PostAuthLambdaFunction.Arn
+        Principal: cognito-idp.amazonaws.com
+        SourceArn: !GetAtt UserPool.Arn
+
+    GoogleIdentityProvider:
+      Type: AWS::Cognito::UserPoolIdentityProvider
+      Properties:
+        UserPoolId: !Ref UserPool
+        ProviderName: Google
+        ProviderType: Google
+        ProviderDetails:
+          client_id: ${self:custom.googleClientId}
+          client_secret: ${self:custom.googleClientSecret}
+          authorize_scopes: "profile email openid"
+        AttributeMapping:
+          email: email
+          email_verified: email_verified
+          name: name
+
+    UserPoolDomain:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        UserPoolId: !Ref UserPool
+        Domain: ${self:custom.cognitoDomainPrefix}
+
+    UserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      DependsOn: GoogleIdentityProvider
+      Properties:
+        UserPoolId: !Ref UserPool
+        ClientName: ${self:service}-${self:provider.stage}-web
+        GenerateSecret: false
+        SupportedIdentityProviders:
+          - Google
+        AllowedOAuthFlows: [code]
+        AllowedOAuthFlowsUserPoolClient: true
+        AllowedOAuthScopes: [openid, email, profile]
+        CallbackURLs:
+          - http://localhost:5173/auth/callback
+          - https://sharing.schuit.io/auth/callback
+        LogoutURLs:
+          - http://localhost:5173/
+          - https://sharing.schuit.io/
+        PreventUserExistenceErrors: ENABLED
+        ExplicitAuthFlows:
+          - ALLOW_REFRESH_TOKEN_AUTH
+
+    AdminsGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: admins
+        UserPoolId: !Ref UserPool
+        Description: Administrators who can send invites and manage mounts
+        Precedence: 1
+
+    # ---------- DynamoDB ----------
+    InvitesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-invites
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - { AttributeName: email, AttributeType: S }
+        KeySchema:
+          - { AttributeName: email, KeyType: HASH }
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+
+    MountsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-mounts
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - { AttributeName: mountPath, AttributeType: S }
+        KeySchema:
+          - { AttributeName: mountPath, KeyType: HASH }
+
+  Outputs:
+    UserPoolId:
+      Value: !Ref UserPool
+    UserPoolClientId:
+      Value: !Ref UserPoolClient
+    CognitoDomain:
+      Value: !Sub "https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+    ApiEndpoint:
+      Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+    HttpApiId:
+      Value: !Ref HttpApi
