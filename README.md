@@ -125,10 +125,13 @@ The first admin (`riley.schuit@gmail.com`) is bootstrapped automatically — no 
 `infrastructure/frontend-infra.yml` creates:
 
 - ACM certificate for `sharing.schuit.io` (DNS-validated)
-- Private S3 bucket for the SPA
-- CloudFront Origin Access Control
-- CloudFront distribution with two origins (SPA default, `/api/*` → API Gateway)
+- CloudFront Origin Access Control (OAC)
+- CloudFront distribution with two origins:
+  - default → the existing `schuit-sharing` bucket, scoped to the `web/` prefix
+  - `/api/*` → API Gateway
 - Route 53 A-alias `sharing.schuit.io → CloudFront`
+
+The SPA lives at `s3://schuit-sharing/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix.
 
 ### DNS model (read this first)
 
@@ -173,13 +176,24 @@ aws cloudformation deploy \
       DomainName=sharing.schuit.io \
       HostedZoneId=$HOSTED_ZONE_ID \
       ApiGatewayDomain=$API_HOST \
+      SiteBucket=schuit-sharing \
+      SitePrefix=web \
+      SiteBucketRegion=us-east-1 \
   --capabilities CAPABILITY_IAM
 ```
 
 Outputs:
-- `SiteBucketName` — the private S3 bucket the SPA lives in
+- `SiteBucketName` — `schuit-sharing`
+- `SitePrefix` — `web`
+- `SiteUploadPath` — `s3://schuit-sharing/web/` (sync target)
 - `DistributionId` — for cache invalidation
 - `Url` — `https://sharing.schuit.io`
+
+> **Heads-up on bucket policy:** this stack now owns the bucket policy on
+> `schuit-sharing` (the OAC grant). Don't set a bucket policy manually or
+> via another tool — put any additional statements in `SiteBucketPolicy`
+> inside `frontend-infra.yml` and redeploy. Lambda access to ROM files
+> uses IAM (not the bucket policy), so this doesn't affect the backend.
 
 ## 5. Build & upload the frontend
 
@@ -204,11 +218,13 @@ Then build and sync:
 npm install
 npm run build
 
-aws s3 sync dist/ s3://<SiteBucketName>/ --delete
+aws s3 sync dist/ s3://schuit-sharing/web/ --delete
 aws cloudfront create-invalidation \
   --distribution-id <DistributionId> \
   --paths "/*"
 ```
+
+The `--delete` flag will remove objects under `web/` that aren't in the new build. Because the OAC is scoped to `web/*`, this only touches the SPA — `Video_Game_ROMs/` and other shared content are untouched.
 
 ## 6. First sign-in + configure the `/roms` mount
 

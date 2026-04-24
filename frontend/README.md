@@ -60,16 +60,30 @@ Output lands in `dist/`.
 
 ## 5. Deploy to S3 + invalidate CloudFront
 
-```bash
-SITE_BUCKET=<SiteBucketName from CFN stack>
-DISTRIBUTION_ID=<DistributionId from CFN stack>
+The SPA lives under `s3://schuit-sharing/web/`. The CloudFormation stack's
+`SiteUploadPath` output has the full target URI.
 
-aws s3 sync dist/ s3://$SITE_BUCKET/ --delete
+```bash
+# Grab from CFN outputs (or hardcode — they won't change)
+SITE_UPLOAD_PATH=$(aws cloudformation describe-stacks \
+  --region us-east-1 \
+  --stack-name rom-hub-frontend \
+  --query "Stacks[0].Outputs[?OutputKey=='SiteUploadPath'].OutputValue" \
+  --output text)
+DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+  --region us-east-1 \
+  --stack-name rom-hub-frontend \
+  --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" \
+  --output text)
+
+aws s3 sync dist/ "$SITE_UPLOAD_PATH" --delete
 
 aws cloudfront create-invalidation \
-  --distribution-id $DISTRIBUTION_ID \
+  --distribution-id "$DISTRIBUTION_ID" \
   --paths "/*"
 ```
+
+The `--delete` flag only removes objects under the `web/` prefix (by definition of `aws s3 sync`). Files outside `web/` — like `Video_Game_ROMs/` — are not touched.
 
 CloudFront returns an `InvalidationId`. The new build is live in ~60 seconds.
 
@@ -78,10 +92,10 @@ CloudFront returns an `InvalidationId`. The new build is live in ~60 seconds.
 Add to your `package.json` scripts:
 
 ```json
-"deploy": "vite build && aws s3 sync dist/ s3://$SITE_BUCKET/ --delete && aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'"
+"deploy": "vite build && aws s3 sync dist/ s3://schuit-sharing/web/ --delete && aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'"
 ```
 
-Then: `SITE_BUCKET=... DISTRIBUTION_ID=... npm run deploy`.
+Then: `DISTRIBUTION_ID=... npm run deploy`.
 
 ## Routes
 

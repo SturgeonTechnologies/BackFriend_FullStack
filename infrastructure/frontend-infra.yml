@@ -1,10 +1,20 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   CloudFront distribution for sharing.schuit.io with:
-    - Default behavior: static React SPA from a private S3 bucket (via OAC)
+    - Default behavior: static React SPA served from an *existing* S3 bucket
+      (default: schuit-sharing, prefix: web/) via OAC
     - /api/* behavior: proxied to the API Gateway HTTP API created by the backend stack
     - Cert: ACM in us-east-1 (DNS-validated against the Route 53 hosted zone)
     - DNS: Route 53 A-alias record pointing sharing.schuit.io at the distribution
+
+  The SPA is stored under s3://<SiteBucket>/<SitePrefix>/, e.g.
+  s3://schuit-sharing/web/index.html. CloudFront's OriginPath prepends
+  /<SitePrefix> so index.html requests hit the right S3 key.
+
+  NOTE: this stack owns the `SiteBucket`'s bucket policy (the CloudFront OAC
+  grant). If `schuit-sharing` needs other bucket-policy statements, add them
+  to the `SiteBucketPolicy` resource here — managing that policy outside
+  the stack will cause drift.
 
   Deploy this in us-east-1 so the ACM cert is in the required region for CloudFront.
 
@@ -18,6 +28,18 @@ Parameters:
   ApiGatewayDomain:
     Type: String
     Description: The execute-api domain printed by `serverless info` (e.g. xxxxxxxx.execute-api.us-east-1.amazonaws.com)
+  SiteBucket:
+    Type: String
+    Default: schuit-sharing
+    Description: Name of the *existing* S3 bucket that will host the SPA. Bucket must already exist.
+  SitePrefix:
+    Type: String
+    Default: web
+    Description: S3 key prefix under SiteBucket where the SPA lives. No leading or trailing slash.
+  SiteBucketRegion:
+    Type: String
+    Default: us-east-1
+    Description: Region where SiteBucket lives. Needed to build the correct S3 regional origin DNS name.
 
 Resources:
   # ---------- TLS certificate ----------
@@ -29,20 +51,6 @@ Resources:
       DomainValidationOptions:
         - DomainName: !Ref DomainName
           HostedZoneId: !Ref HostedZoneId
-
-  # ---------- Site bucket (private, fronted by CloudFront) ----------
-  SiteBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "${AWS::StackName}-site-${AWS::AccountId}"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
 
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -69,8 +77,10 @@ Resources:
           SslSupportMethod: sni-only
           MinimumProtocolVersion: TLSv1.2_2021
         Origins:
+          # SPA origin: existing shared bucket, scoped to /<SitePrefix> via OriginPath.
           - Id: s3-site
-            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            DomainName: !Sub "${SiteBucket}.s3.${SiteBucketRegion}.amazonaws.com"
+            OriginPath: !Sub "/${SitePrefix}"
             S3OriginConfig:
               OriginAccessIdentity: ""
             OriginAccessControlId: !GetAtt OriginAccessControl.Id
@@ -128,6 +138,8 @@ Resources:
         }
 
   # ---------- Bucket policy (OAC) ----------
+  # Scoped to just the /<SitePrefix>/* objects, so the distribution cannot
+  # serve anything outside the SPA's prefix even if it's asked to.
   SiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -135,12 +147,12 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AllowCloudFrontOAC
+          - Sid: AllowCloudFrontOACReadSPA
             Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub "${SiteBucket.Arn}/*"
+            Resource: !Sub "arn:aws:s3:::${SiteBucket}/${SitePrefix}/*"
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
@@ -159,6 +171,13 @@ Resources:
 Outputs:
   SiteBucketName:
     Value: !Ref SiteBucket
+    Description: Existing S3 bucket that hosts the SPA.
+  SitePrefix:
+    Value: !Ref SitePrefix
+    Description: Key prefix under SiteBucket where the SPA lives. Sync dist/ to s3://<SiteBucket>/<SitePrefix>/.
+  SiteUploadPath:
+    Value: !Sub "s3://${SiteBucket}/${SitePrefix}/"
+    Description: Full S3 URI for `aws s3 sync dist/` target.
   DistributionId:
     Value: !Ref Distribution
   DistributionDomain:

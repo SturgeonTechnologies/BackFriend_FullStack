@@ -3,11 +3,28 @@
 CloudFormation template that provisions the `sharing.schuit.io` front door:
 
 - ACM certificate (DNS-validated against the Route 53 hosted zone)
-- Private S3 bucket for the SPA (OAC, no public access)
 - CloudFront distribution with two origins:
-  - Default → S3 site
+  - Default → existing S3 bucket (default: `schuit-sharing`), scoped via OAC + OriginPath to the `web/` prefix
   - `/api/*` → API Gateway (CloudFront Function strips `/api` prefix before forwarding)
 - Route 53 A-alias `sharing.schuit.io → CloudFront`
+
+## Where the SPA lives
+
+The SPA is stored at `s3://schuit-sharing/web/`. One bucket hosts both the site and the shared files (ROMs, etc.). CloudFront's OAC is scoped to `web/*` only — the distribution cannot serve anything outside that prefix, even if an attacker forged a request for `/Video_Game_ROMs/foo.rom`.
+
+Override with env vars on `deploy.sh`:
+
+| Env var              | Default         | Purpose                               |
+|----------------------|-----------------|---------------------------------------|
+| `SITE_BUCKET`        | `schuit-sharing`| Bucket hosting the SPA                |
+| `SITE_PREFIX`        | `web`           | Key prefix (no leading/trailing `/`)  |
+| `SITE_BUCKET_REGION` | `us-east-1`     | Region where `SITE_BUCKET` lives      |
+
+### Bucket policy warning
+
+This stack owns the bucket policy on `SiteBucket`. If you already set a policy on `schuit-sharing` manually, CloudFormation will overwrite it with the single OAC grant statement. Put any additional statements inside `SiteBucketPolicy` in `frontend-infra.yml`.
+
+(Today there's no problem — Lambda accesses ROM files via IAM-granted roles, not the bucket policy.)
 
 ## How DNS works here
 
@@ -78,6 +95,9 @@ aws cloudformation deploy \
       DomainName=sharing.schuit.io \
       HostedZoneId=$HOSTED_ZONE_ID \
       ApiGatewayDomain=$API_HOST \
+      SiteBucket=schuit-sharing \
+      SitePrefix=web \
+      SiteBucketRegion=us-east-1 \
   --capabilities CAPABILITY_IAM
 ```
 
@@ -92,12 +112,14 @@ aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs' --output table
 ```
 
-| Output               | Used by                   |
-|----------------------|---------------------------|
-| `SiteBucketName`     | `frontend/` deploy        |
-| `DistributionId`     | `frontend/` invalidation  |
-| `DistributionDomain` | (diagnostic)              |
-| `Url`                | https://sharing.schuit.io |
+| Output               | Used by                           |
+|----------------------|-----------------------------------|
+| `SiteBucketName`     | `frontend/` deploy (`schuit-sharing`) |
+| `SitePrefix`         | `frontend/` deploy (`web`)        |
+| `SiteUploadPath`     | `s3://schuit-sharing/web/` — paste straight into `aws s3 sync` |
+| `DistributionId`     | `frontend/` invalidation          |
+| `DistributionDomain` | (diagnostic)                      |
+| `Url`                | https://sharing.schuit.io         |
 
 ## 4. Upload the initial site
 
@@ -108,12 +130,7 @@ See `../frontend/README.md` step 5. After `aws s3 sync`, visit https://sharing.s
 ### If you change `frontend-infra.yml`
 
 ```bash
-aws cloudformation deploy \
-  --region us-east-1 \
-  --stack-name rom-hub-frontend \
-  --template-file frontend-infra.yml \
-  --parameter-overrides DomainName=sharing.schuit.io HostedZoneId=$HOSTED_ZONE_ID ApiGatewayDomain=$API_HOST \
-  --capabilities CAPABILITY_IAM
+cd infrastructure && ./deploy.sh   # picks up the new template
 ```
 
 CloudFormation diffs and applies only what changed. Distribution updates take 5–15 min to fully propagate.
