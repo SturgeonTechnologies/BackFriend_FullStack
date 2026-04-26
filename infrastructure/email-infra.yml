@@ -119,8 +119,12 @@ Resources:
         - '"v=spf1 include:amazonses.com ~all"'
 
 Outputs:
+  # NOTE: AWS::SES::EmailIdentity does NOT expose an `Arn` GetAtt attribute
+  # (only DkimDNSTokenName1/2/3 and DkimDNSTokenValue1/2/3 — see CFN docs).
+  # We construct the identity ARN with !Sub instead. The format is
+  # arn:aws:ses:<region>:<account>:identity/<domain>.
   IdentityArn:
-    Value: !GetAtt EmailIdentity.Arn
+    Value: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${Domain}"
     Description: ARN of the SES email identity. Reference this in IAM ses:SendEmail Resource conditions if you want to scope tightly.
   IdentityName:
     Value: !Ref Domain
