@@ -3,6 +3,10 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
+> **Status:** SES invite emails are wired up in code but the end-to-end
+> send hasn't been verified yet — see [`TODO.md`](./TODO.md) for the
+> diagnostic checklist and pick this up in the next session.
+
 - Auth: **Cognito + Google federation** (sign in with Google)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
 - Admins invite other users by email; invitees just click "Sign in with Google"
