@@ -58,10 +58,12 @@ echo "    SiteBucket=$SITE_BUCKET"
 echo "    SitePrefix=$SITE_PREFIX"
 echo "    SiteBucketRegion=$SITE_BUCKET_REGION"
 
-echo "==> Looking up API Gateway host from backend stack (stage=$STAGE)"
+echo "==> Looking up API Gateway host from backend stack (stage=$STAGE) in us-east-1"
 BACKEND_STACK="rom-hub-${STAGE}"
+# Backend stack lives in us-east-1 regardless of your aws CLI default region.
 API_ENDPOINT="$(
   aws cloudformation describe-stacks \
+    --region us-east-1 \
     --stack-name "$BACKEND_STACK" \
     --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl' || OutputKey=='ServiceEndpoint' || OutputKey=='ApiEndpoint'].OutputValue | [0]" \
     --output text $PROFILE_FLAG 2>/dev/null || true
