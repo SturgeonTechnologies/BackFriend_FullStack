@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && aws s3 sync dist/ s3://$VITE_SITE_BUCKET --delete"
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "react": "^18.3.1",
