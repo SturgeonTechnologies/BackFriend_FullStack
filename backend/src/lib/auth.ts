@@ -18,19 +18,11 @@ export function getCaller(event: APIGatewayProxyEventV2WithJWTAuthorizer): Calle
   const sub = String(claims.sub ?? "");
 
   // "cognito:groups" can arrive in several shapes depending on the runtime
-  // path. We log the raw shape (DIAG_AUTH_GROUPS) once per request so we
-  // can confirm what API Gateway is actually sending — remove the log
-  // after the auth flow is confirmed working.
+  // path. Verified empirically against AWS HTTP API v2 (April 2026): the
+  // JWT authorizer emits array claims as Java's Object[].toString()
+  // format, e.g. "[us-east-1_pool_Google admins]" — bracketed, space-
+  // separated, no commas, no quotes.
   const raw = claims["cognito:groups"];
-  console.log(
-    "DIAG_AUTH_GROUPS",
-    JSON.stringify({
-      raw,
-      typeof: typeof raw,
-      isArray: Array.isArray(raw),
-    }),
-  );
-
   let groups: string[] = [];
   if (Array.isArray(raw)) {
     groups = raw.map(String);

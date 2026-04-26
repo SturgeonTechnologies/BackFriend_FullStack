@@ -5,64 +5,39 @@ delete the line, when they're done.
 
 ## Active
 
-- [ ] **SES invite emails not working yet.** Code is deployed
-      (`4848be9 Send invite emails via SES from noreply@schuit.io`), but
-      the actual end-to-end send hasn't succeeded. Pick this up next
-      session — see the diagnostic checklist below before assuming any
-      particular failure mode.
+- [ ] **SES is still in sandbox.** End-to-end send works
+      (`riley.schuit+serverlesstest@gmail.com` received an invite on
+      2026-04-26), but only verified recipients can receive mail until
+      we request production access. To open it up: SES console →
+      Account dashboard → "Request production access". That bumps the
+      24-hour sending quota from 200 to ~50,000 and removes the
+      verified-recipient restriction.
 
-      Diagnostic checklist (run these first):
-      ```bash
-      # 1. Did the email-infra stack deploy cleanly?
-      aws cloudformation describe-stacks --region us-east-1 \
-        --stack-name rom-hub-email \
-        --query 'Stacks[0].StackStatus' --output text
-
-      # 2. Is the SES domain identity verified?
-      aws ses get-identity-verification-attributes --region us-east-1 \
-        --identities schuit.io \
-        --query 'VerificationAttributes."schuit.io".VerificationStatus'
-
-      # 3. Are the DKIM tokens verified?
-      aws ses get-identity-dkim-attributes --region us-east-1 \
-        --identities schuit.io \
-        --query 'DkimAttributes."schuit.io".DkimVerificationStatus'
-
-      # 4. Did the backend redeploy land MAIL_FROM + ses:SendEmail IAM?
-      aws lambda get-function-configuration --region us-east-1 \
-        --function-name rom-hub-dev-createInvite \
-        --query 'Environment.Variables.MAIL_FROM' --output text
-
-      # 5. Sandbox status (until we request production access, only
-      #    verified recipients can receive mail)
-      aws sesv2 get-account --region us-east-1 \
-        --query 'ProductionAccessEnabled'
-
-      # 6. The actual error from the last attempted send:
-      cd backend && npx serverless logs -f createInvite --stage dev \
-        --startTime 1h
-      ```
-
-      Likely culprits in rough probability order:
-        1. SES still in *sandbox* and the recipient address isn't verified.
-           Fix: `aws ses verify-email-identity --region us-east-1
-           --email-address <recipient>` and click the link AWS sends, OR
-           request production access via the SES console.
-        2. DKIM CNAMEs not yet verified (5–60 min wait after stack deploy).
-           Fix: just wait, then re-poll #3.
-        3. Backend wasn't redeployed since the SES commit, so the Lambdas
-           don't have `MAIL_FROM`/`MAIL_REGION` env vars or the
-           `ses:SendEmail` IAM grant. Fix: `cd backend && npx serverless
-           deploy --stage dev`.
-        4. `MailFromAttributes.BehaviorOnMxFailure: REJECT_MESSAGE` is set
-           in `email-infra.yml` — if the `mail.schuit.io` MX/SPF didn't
-           propagate, SES will refuse to send. Fix: confirm the records
-           landed: `dig mail.schuit.io MX` and `dig mail.schuit.io TXT`.
+- [ ] **Hosted-UI logout requires an exact LogoutURLs match.** The
+      registered URLs both end with `/`
+      (`http://localhost:5173/`, `https://sharing.schuit.io/`), so a
+      `logout_uri=https://sharing.schuit.io` (no trailing slash) is
+      rejected by Cognito with "Required String parameter
+      'redirect_uri' is not present". If the in-app logout sends a URL
+      without the trailing slash, either fix the client to include it
+      or relax LogoutURLs in `serverless.yml` to register both forms.
 
 ## Done in last session (for context)
 
-- `a2f3a5e` Per-mount allowedEmails access control + SPA asset routing
-- `b616904` Document /api same-origin pattern in .env.example
-- `90ee5b1` Attach SPA rewrite function to /api/* behavior too
-- `4848be9` Send invite emails via SES from noreply@schuit.io (build
-  complete, end-to-end send not yet verified — see Active above)
+- `4848be9` Send invite emails via SES from noreply@schuit.io
+- `c632bb6` Add TODO.md hand-off note
+- `44625b4` README: flag SES end-to-end send as not yet verified
+- `a9a927d` email-infra: shorten Description to fit CFN's 1024-char limit
+- `bc708a4` email-infra: fix invalid !GetAtt EmailIdentity.Arn (build
+  ARN with !Sub instead) — unblocked the email stack create
+- `9d5a473` auth: parse space-delimited cognito:groups from HTTP API
+  v2 authorizer (initial parser fix — but still emitted single-token
+  output for the bracketed Java-toString format)
+- `3e64c91` auth: log raw cognito:groups shape and broaden parser
+  (added DIAG_AUTH_GROUPS log + JSON.parse-first strategy + regex
+  fallback that strips brackets/quotes/braces and splits on commas
+  OR whitespace) — confirmed format is `"[<pool>_Google admins]"`
+  (Java Object[].toString) and the broadened parser handles it. The
+  diagnostic log was removed in the follow-up commit.
+- End-to-end verified: admin gate passes, invite written to DDB,
+  invite email delivered via SES.
