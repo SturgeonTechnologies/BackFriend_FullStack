@@ -60,7 +60,7 @@ Output lands in `dist/`.
 
 ## 5. Deploy to S3 + invalidate CloudFront
 
-The SPA lives under `s3://schuit-sharing/web/`. The CloudFormation stack's
+The SPA(Single Page Applications) lives under `s3://schuit-sharing/web/`. The CloudFormation stack's
 `SiteUploadPath` output has the full target URI.
 
 ```bash
