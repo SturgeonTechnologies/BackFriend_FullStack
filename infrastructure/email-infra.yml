@@ -1,46 +1,25 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: |
-  SES domain identity for sending invite emails from noreply@schuit.io.
-
-  This stack is deliberately scoped so it can coexist with Google Workspace
-  on the *same* root domain (schuit.io). It does NOT touch the root MX or
-  root SPF — those belong to Google. Specifically it creates:
-
-    - An SES domain identity for `schuit.io` with EasyDKIM enabled. SES
-      mints three DKIM key pairs and exposes their CNAME targets via
-      DkimDNSTokenName1/2/3 + DkimDNSTokenValue1/2/3 attributes. Each
-      selector lives at <token>._domainkey.schuit.io and is unique to SES,
-      so it does not conflict with Google's google._domainkey.schuit.io.
-
-    - A custom MAIL FROM domain on `mail.schuit.io` (a *subdomain*) with
-      its own MX and SPF. SES's bounce/complaint envelope (Return-Path)
-      uses noreply@mail.schuit.io while the visible From: header still
-      reads noreply@schuit.io. DKIM alignment + the matching DKIM key on
-      the parent identity = DMARC-compliant delivery without disturbing
-      Google's MX records on the apex.
-
-    - Three Route 53 CNAMEs (DKIM), one MX, and one TXT (SPF) on the
-      `mail.schuit.io` subdomain.
-
-  Order of operations:
-    1. Deploy this stack. CloudFormation creates the records and SES marks
-       the identity "Pending" for verification.
-    2. Wait 5–60 minutes (often <15) for SES to detect the DKIM CNAMEs
-       and flip the identity to Verified.
-    3. After that, `aws ses get-identity-verification-attributes` shows
-       VerificationStatus=Success and DKIM tokens are Verified.
-
-  Sandbox warning:
-    A new SES account in us-east-1 starts in *sandbox* mode. In sandbox you
-    can ONLY send to verified email addresses (and only 200 messages/24h,
-    1/sec). Verify riley.schuit@gmail.com as a recipient identity for
-    initial testing, then request production access in the SES console:
-      https://console.aws.amazon.com/ses/home?region=us-east-1#/account
-    Once granted, you can send to any address.
-
-  Region: deploy to us-east-1 (the same region as the Lambdas; SES is a
-  regional service and the Lambda IAM role grants ses:SendEmail to the
-  us-east-1 endpoint).
+# Long-form notes are in YAML comments below (not subject to CFN's 1024-char
+# Description limit) and in ../README.md "4b. Deploy the SES email stack".
+#
+# Coexistence with Google Workspace on schuit.io:
+#   - DKIM uses unique SES selector subdomains; doesn't collide with
+#     google._domainkey.schuit.io.
+#   - Custom MAIL FROM lives on mail.schuit.io (subdomain) with its own
+#     MX + SPF; root MX/SPF (Google) is left alone.
+#   - From: header is still noreply@schuit.io and is DKIM-signed by the
+#     apex identity, so DMARC alignment passes.
+#
+# Operational order:
+#   1. Deploy. SES creates the identity in Pending state and CFN creates
+#      the matching DKIM CNAMEs + MAIL FROM MX/SPF.
+#   2. Wait 5–60 min for SES to detect the records and flip to Verified.
+#   3. SES sandbox: new accounts can only send to verified recipients.
+#      Verify your test recipient or request production access in the
+#      SES console once DKIM is green.
+#   4. Region: deploy in us-east-1 (matches the Lambda region; SES is
+#      regional and identities don't replicate).
+Description: SES domain identity for invite emails from noreply@schuit.io. Provisions an SES identity with EasyDKIM (3 CNAMEs) and a custom MAIL FROM on mail.schuit.io so the apex MX/SPF stays untouched for Google Workspace coexistence. DKIM verifies asynchronously (5–60 min). Deploy in us-east-1.
 
 Parameters:
   Domain:
