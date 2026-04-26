@@ -1,4 +1,4 @@
-service: rom-hub
+service: schuit-sharing
 
 frameworkVersion: "3"
 
@@ -6,6 +6,9 @@ provider:
   name: aws
   runtime: nodejs20.x
   region: ${opt:region, 'us-east-1'}
+  # Default stage is `dev` (intended for a future personal sandbox / local
+  # `serverless offline` use). The live production environment is deployed
+  # with `--stage prod`, producing resources named `schuit-sharing-prod-*`.
   stage: ${opt:stage, 'dev'}
   memorySize: 256
   timeout: 15
@@ -24,10 +27,10 @@ provider:
     SHARES_BUCKET: ${self:custom.sharesBucket}
     SITE_ORIGIN: ${self:custom.siteOrigin.${self:provider.stage}, self:custom.siteOrigin.default}
     # SES outbound mail. The identity itself is provisioned by the
-    # `rom-hub-email` CFN stack (see infrastructure/email-infra.yml). We do
-    # NOT make this stack depend on it — the identity is shared, lives in
-    # its own stack, and verifies asynchronously. Lambdas just need the
-    # From address + region.
+    # `schuit-sharing-email` CFN stack (see infrastructure/email-infra.yml).
+    # We do NOT make this stack depend on it — the identity is shared,
+    # lives in its own stack, and verifies asynchronously. Lambdas just
+    # need the From address + region.
     MAIL_FROM: ${self:custom.mailFrom}
     MAIL_REGION: ${self:custom.mailRegion}
   httpApi:
@@ -88,10 +91,10 @@ provider:
             - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
         # SES: send invite emails. Resource is wildcarded to all identities
         # in this account/region — the SES identity (schuit.io) is owned by
-        # a separate CFN stack (rom-hub-email), so referring to it by ARN
-        # would couple the two stacks. The Lambda code only ever calls
-        # SendEmail with `From: ${MAIL_FROM}`, so an attacker would need
-        # code-exec on the Lambda to abuse this scope.
+        # a separate CFN stack (schuit-sharing-email), so referring to it
+        # by ARN would couple the two stacks. The Lambda code only ever
+        # calls SendEmail with `From: ${MAIL_FROM}`, so an attacker would
+        # need code-exec on the Lambda to abuse this scope.
         - Effect: Allow
           Action:
             - ses:SendEmail
@@ -124,18 +127,20 @@ custom:
   cognitoDomainPrefix: ${self:service}-${self:provider.stage}-${aws:accountId}
 
   # SES sender. The visible From: address; must be a verified address inside
-  # a verified identity. The `rom-hub-email` stack verifies the *domain*
-  # `schuit.io`, which auto-permits any localpart@schuit.io.
+  # a verified identity. The `schuit-sharing-email` stack verifies the
+  # *domain* `schuit.io`, which auto-permits any localpart@schuit.io.
   mailFrom: noreply@schuit.io
   # SES region. Must match the region the email-infra stack was deployed
   # into (us-east-1) — SES is regional and identities don't replicate.
   mailRegion: us-east-1
 
   # Google OAuth credentials — stored in SSM Parameter Store, NOT in this file.
-  #   aws ssm put-parameter --name /rom-hub/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"
-  #   aws ssm put-parameter --name /rom-hub/${stage}/google/client_secret --type SecureString --value "GOCSPX-..."
-  googleClientId:    ${ssm:/rom-hub/${self:provider.stage}/google/client_id}
-  googleClientSecret: ${ssm:/rom-hub/${self:provider.stage}/google/client_secret}
+  # Path is parameterized by service+stage so a future staging deploy
+  # uses /schuit-sharing/staging/... without colliding with prod.
+  #   aws ssm put-parameter --name /schuit-sharing/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"
+  #   aws ssm put-parameter --name /schuit-sharing/${stage}/google/client_secret --type SecureString --value "GOCSPX-..."
+  googleClientId:    ${ssm:/${self:service}/${self:provider.stage}/google/client_id}
+  googleClientSecret: ${ssm:/${self:service}/${self:provider.stage}/google/client_secret}
 
   esbuild:
     bundle: true

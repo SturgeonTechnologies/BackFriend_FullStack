@@ -3,16 +3,16 @@
 # invalidates the CloudFront distribution.
 #
 # Auto-discovers SiteUploadPath and DistributionId from the
-# `rom-hub-frontend` CloudFormation stack.
+# `schuit-sharing-frontend` CloudFormation stack.
 #
 # Usage:
 #   ./scripts/deploy.sh                # uses your default AWS profile
 #   AWS_PROFILE=my-profile ./scripts/deploy.sh
-#   STACK_NAME=rom-hub-frontend ./scripts/deploy.sh
+#   STACK_NAME=schuit-sharing-frontend ./scripts/deploy.sh
 
 set -euo pipefail
 
-STACK_NAME="${STACK_NAME:-rom-hub-frontend}"
+STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
 REGION="${AWS_REGION:-us-east-1}"
 
 PROFILE_FLAG=""

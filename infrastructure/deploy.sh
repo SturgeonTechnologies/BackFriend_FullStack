@@ -10,17 +10,17 @@
 # SITE_BUCKET_REGION env vars.
 #
 # Usage:
-#   ./deploy.sh                       # stage=dev
-#   STAGE=prod ./deploy.sh
+#   ./deploy.sh                       # stage=prod (the live deployment)
+#   STAGE=dev ./deploy.sh             # personal sandbox / future use
 #   PROFILE=my-aws-profile ./deploy.sh
 #   SITE_BUCKET=my-bucket SITE_PREFIX=app ./deploy.sh
 
 set -euo pipefail
 
-STAGE="${STAGE:-dev}"
+STAGE="${STAGE:-prod}"
 DOMAIN="${DOMAIN:-sharing.schuit.io}"
 PARENT_ZONE="${PARENT_ZONE:-schuit.io}"
-STACK_NAME="${STACK_NAME:-rom-hub-frontend}"
+STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
 SITE_BUCKET="${SITE_BUCKET:-schuit-sharing}"
 SITE_PREFIX="${SITE_PREFIX:-web}"
 SITE_BUCKET_REGION="${SITE_BUCKET_REGION:-us-east-1}"
@@ -59,7 +59,7 @@ echo "    SitePrefix=$SITE_PREFIX"
 echo "    SiteBucketRegion=$SITE_BUCKET_REGION"
 
 echo "==> Looking up API Gateway host from backend stack (stage=$STAGE) in us-east-1"
-BACKEND_STACK="rom-hub-${STAGE}"
+BACKEND_STACK="schuit-sharing-${STAGE}"
 # Backend stack lives in us-east-1 regardless of your aws CLI default region.
 API_ENDPOINT="$(
   aws cloudformation describe-stacks \

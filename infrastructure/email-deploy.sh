@@ -28,7 +28,7 @@ DOMAIN="${DOMAIN:-schuit.io}"
 PARENT_ZONE="${PARENT_ZONE:-$DOMAIN}"
 MAIL_FROM_SUB="${MAIL_FROM_SUB:-mail}"
 REGION="${REGION:-us-east-1}"
-STACK_NAME="${STACK_NAME:-rom-hub-email}"
+STACK_NAME="${STACK_NAME:-schuit-sharing-email}"
 
 PROFILE_FLAG=""
 if [[ -n "${PROFILE:-}" ]]; then
@@ -98,6 +98,6 @@ Next steps:
 
   4. Backend Lambdas pick up the env vars MAIL_FROM and MAIL_REGION from
      serverless.yml; redeploy the backend so the new IAM grant + envs land:
-       cd ../backend && npx serverless deploy --stage dev
+       cd ../backend && npx serverless deploy --stage prod
 
 EOF

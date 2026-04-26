@@ -30,7 +30,7 @@ import {
 
 const STAGE = process.env.STAGE || "dev";
 const REGION = process.env.AWS_REGION || "us-east-1";
-const SERVICE = "rom-hub";
+const SERVICE = "schuit-sharing";
 const STACK_NAME = `${SERVICE}-${STAGE}`;
 
 const cfn = new CloudFormationClient({ region: REGION });

@@ -5,6 +5,119 @@ delete the line, when they're done.
 
 ## Active
 
+- [ ] **Migrate the live deployment from `rom-hub-dev` to
+      `schuit-sharing-prod`.** Code is renamed (this commit). The AWS
+      resources still need cutover. Runbook below — do all of it in
+      one sitting if possible since the old + new stacks coexist
+      until step 9.
+
+      **Pre-flight.** New SSM path is `/schuit-sharing/prod/google/*`
+      (was `/rom-hub/dev/google/*`). New Cognito hosted-UI domain
+      will be `schuit-sharing-prod-<acct>.auth.us-east-1.
+      amazoncognito.com`. Stack names: `schuit-sharing-prod`
+      (backend), `schuit-sharing-email` (SES). The frontend stack
+      stays `rom-hub-frontend` for now — its rename is an optional
+      later step (#11) since it requires CloudFront re-create.
+
+      ```bash
+      # 1. Copy Google creds to the new SSM path (same values)
+      CID=$(aws ssm get-parameter --region us-east-1 \
+        --name /rom-hub/dev/google/client_id \
+        --query 'Parameter.Value' --output text)
+      CSEC=$(aws ssm get-parameter --region us-east-1 --with-decryption \
+        --name /rom-hub/dev/google/client_secret \
+        --query 'Parameter.Value' --output text)
+      aws ssm put-parameter --region us-east-1 \
+        --name /schuit-sharing/prod/google/client_id \
+        --type String --value "$CID" --overwrite
+      aws ssm put-parameter --region us-east-1 \
+        --name /schuit-sharing/prod/google/client_secret \
+        --type SecureString --value "$CSEC" --overwrite
+
+      # 2. Replace the email stack. Single SES identity per domain,
+      #    so old + new stacks would conflict — must delete first.
+      #    Expect 5–60 min DKIM revalidation gap after redeploy.
+      aws cloudformation delete-stack --region us-east-1 \
+        --stack-name rom-hub-email
+      aws cloudformation wait stack-delete-complete --region us-east-1 \
+        --stack-name rom-hub-email
+      cd infrastructure && ./email-deploy.sh
+
+      # 3. Re-verify the SES sandbox recipient (the old verification
+      #    is tied to the prior identity, so this needs redoing).
+      aws ses verify-email-identity --region us-east-1 \
+        --email-address riley.schuit@gmail.com
+      # (click the link AWS emails you)
+
+      # 4. Wait for DKIM to verify before continuing — otherwise
+      #    every send will fail with REJECT_MESSAGE on MX failure.
+      aws ses get-identity-dkim-attributes --region us-east-1 \
+        --identities schuit.io \
+        --query 'DkimAttributes."schuit.io".DkimVerificationStatus' \
+        --output text   # repeat until "Success"
+
+      # 5. Deploy the new backend stack.
+      cd backend
+      npx serverless deploy --stage prod
+      npm run wire-triggers:prod
+      npx serverless info --stage prod   # capture the outputs
+
+      # 6. Add the NEW Cognito hosted-UI redirect URI to the Google
+      #    OAuth client (Google Cloud Console → APIs & Services →
+      #    Credentials → your OAuth client → Authorized redirect URIs).
+      #    Add:
+      #      https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
+      #    Leave the old rom-hub-dev-* URI registered until step 10.
+
+      # 7. Point CloudFront at the new API Gateway. The frontend
+      #    stack (still named `rom-hub-frontend`) just needs its
+      #    ApiGatewayDomain parameter updated. deploy.sh now reads
+      #    BACKEND_STACK=schuit-sharing-${STAGE}, so STAGE=prod
+      #    points at the new backend automatically.
+      cd ../infrastructure
+      STACK_NAME=rom-hub-frontend STAGE=prod ./deploy.sh
+
+      # 8. Sign in once at https://sharing.schuit.io to bootstrap
+      #    admin on the new User Pool. The postAuth trigger sees
+      #    riley.schuit@gmail.com in BOOTSTRAP_ADMIN_EMAILS and
+      #    adds you to the admins group.
+
+      # 9. Smoke test: create a mount, create an invite to your
+      #    verified address, confirm email arrives.
+
+      # 10. Tear down the old backend stack. We can't use
+      #     `serverless remove` since the service was renamed —
+      #     delete via raw CFN.
+      aws cloudformation delete-stack --region us-east-1 \
+        --stack-name rom-hub-dev
+      aws cloudformation wait stack-delete-complete --region us-east-1 \
+        --stack-name rom-hub-dev
+
+      # 11. Cleanup: delete old SSM params and remove the old Cognito
+      #     redirect URI from the Google OAuth client.
+      aws ssm delete-parameter --region us-east-1 \
+        --name /rom-hub/dev/google/client_id
+      aws ssm delete-parameter --region us-east-1 \
+        --name /rom-hub/dev/google/client_secret
+      ```
+
+      **Optional later step — rename the frontend stack.** Currently
+      `rom-hub-frontend` owns CloudFront + the Route53 A-alias for
+      `sharing.schuit.io` + the ACM cert. CFN doesn't support stack
+      renames; the only path is delete + recreate. Expect ~20–30 min
+      of user-visible downtime (CloudFront propagation). Defer until
+      convenient — the only cost of leaving it is the legacy name in
+      the AWS console.
+
+      ```bash
+      aws cloudformation delete-stack --region us-east-1 \
+        --stack-name rom-hub-frontend
+      aws cloudformation wait stack-delete-complete --region us-east-1 \
+        --stack-name rom-hub-frontend
+      cd infrastructure && ./deploy.sh
+      # default STACK_NAME=schuit-sharing-frontend, STAGE=prod
+      ```
+
 - [ ] **SES is still in sandbox.** End-to-end send works
       (`riley.schuit+serverlesstest@gmail.com` received an invite on
       2026-04-26), but only verified recipients can receive mail until
@@ -38,8 +151,8 @@ delete the line, when they're done.
       `serverless.yml custom.*` need staging entries:
       `allowedOrigins`, `siteOrigin`, `bootstrapAdmins`,
       `cognitoCallbackURLs`, `cognitoLogoutURLs`. Per-stage SSM Google
-      creds at `/rom-hub/staging/google/{client_id,client_secret}`
-      and `/rom-hub/prod/...`.
+      creds at `/schuit-sharing/staging/google/{client_id,client_secret}`
+      (the live `prod` SSM keys already exist after the rename).
 
       **The "dev = prod" naming problem.** The existing `dev` stage
       is what's serving sharing.schuit.io publicly. Two paths: (a)
@@ -52,7 +165,8 @@ delete the line, when they're done.
       gating change — currently has hardcoded values for the prod
       domain/cert/Route53 record. Needs to accept `Domain`,
       `AcmCertArn`, `ApiGatewayDomain` parameters so two stacks
-      (`rom-hub-frontend-staging`, `rom-hub-frontend-prod`) can
+      (`schuit-sharing-frontend-staging`,
+      `schuit-sharing-frontend-prod`) can
       deploy from the same template.
 
       **SES.** Stays as one shared identity on `schuit.io`. Both
@@ -93,7 +207,8 @@ delete the line, when they're done.
         3. Add staging entries to `serverless.yml` custom maps.
         4. Manual `serverless deploy --stage staging` from laptop
            once to confirm clean stand-up.
-        5. Deploy `frontend-infra.yml` as `rom-hub-frontend-staging`.
+        5. Deploy `frontend-infra.yml` as
+           `schuit-sharing-frontend-staging`.
         6. Add staging redirect URIs to Google OAuth client.
         7. Wire OIDC + GitHub Actions, staging workflow first.
         8. Once staging CD is stable, add prod workflow with

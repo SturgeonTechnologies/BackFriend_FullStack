@@ -1,4 +1,4 @@
-# schuit-sharing (rom-hub)
+# schuit-sharing
 
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
@@ -19,7 +19,7 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 ## Layout
 
 ```
-rom-hub/
+schuit-sharing/
 ├── backend/                      Serverless Framework app (Lambda + API GW + Cognito + DDB + S3)
 │   ├── serverless.yml
 │   └── src/
@@ -92,38 +92,38 @@ rom-hub/
 
 ```bash
 aws ssm put-parameter \
-  --name /rom-hub/dev/google/client_id \
+  --name /schuit-sharing/prod/google/client_id \
   --type String \
   --value '<google-client-id>'
 
 aws ssm put-parameter \
-  --name /rom-hub/dev/google/client_secret \
+  --name /schuit-sharing/prod/google/client_secret \
   --type SecureString \
   --value '<google-client-secret>'
 ```
 
-For prod, use `/rom-hub/prod/google/...` (and deploy with `--stage prod`).
+The live deployment uses stage `prod`. The `dev` stage is reserved for a future personal sandbox / `serverless offline` use; if you populate `/schuit-sharing/dev/google/...` you can deploy a parallel sandbox stack with `--stage dev`.
 
 ## 3. Deploy the backend
 
 ```bash
 cd backend
 npm install
-npx serverless deploy --stage dev
+npx serverless deploy --stage prod
 ```
 
 Outputs you'll need:
 
 - `UserPoolId`
 - `UserPoolClientId`
-- `CognitoDomain` — e.g. `https://rom-hub-dev-<acct>.auth.us-east-1.amazoncognito.com`
+- `CognitoDomain` — e.g. `https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com`
 - `SharesBucketName` — the bucket the app reads from (default: `schuit-sharing`)
 - `ApiEndpoint` — raw API Gateway URL; you'll need the host portion only
 
 **Now go back to Google Cloud Console** and add the Cognito callback to the authorized redirect URIs:
 
 ```
-https://rom-hub-dev-<acct>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
+https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
 ```
 
 The first admin (`riley.schuit@gmail.com`) is bootstrapped automatically — no need to manually create the user or add them to the admins group. The `postAuth` Lambda trigger adds them on first sign-in.
@@ -178,7 +178,7 @@ API_HOST=abc123def.execute-api.us-east-1.amazonaws.com   # from serverless outpu
 
 aws cloudformation deploy \
   --region us-east-1 \
-  --stack-name rom-hub-frontend \
+  --stack-name schuit-sharing-frontend \
   --template-file infrastructure/frontend-infra.yml \
   --parameter-overrides \
       DomainName=sharing.schuit.io \
@@ -231,7 +231,7 @@ Or manually:
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
 aws cloudformation deploy \
   --region us-east-1 \
-  --stack-name rom-hub-email \
+  --stack-name schuit-sharing-email \
   --template-file infrastructure/email-infra.yml \
   --parameter-overrides \
       Domain=schuit.io \
@@ -302,7 +302,7 @@ Fill in `.env.local`:
 ```
 VITE_API_BASE=https://sharing.schuit.io/api
 VITE_USER_POOL_CLIENT_ID=<UserPoolClientId>
-VITE_COGNITO_DOMAIN=https://rom-hub-dev-<acct>.auth.us-east-1.amazoncognito.com
+VITE_COGNITO_DOMAIN=https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com
 VITE_REDIRECT_URI=https://sharing.schuit.io/auth/callback
 VITE_LOGOUT_REDIRECT=https://sharing.schuit.io/
 ```

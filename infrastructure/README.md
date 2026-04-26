@@ -89,7 +89,7 @@ cd infrastructure
 
 aws cloudformation deploy \
   --region us-east-1 \
-  --stack-name rom-hub-frontend \
+  --stack-name schuit-sharing-frontend \
   --template-file frontend-infra.yml \
   --parameter-overrides \
       DomainName=sharing.schuit.io \
@@ -108,7 +108,7 @@ DNS validation for ACM takes 2–5 minutes. The stack won't finish until the cer
 ```bash
 aws cloudformation describe-stacks \
   --region us-east-1 \
-  --stack-name rom-hub-frontend \
+  --stack-name schuit-sharing-frontend \
   --query 'Stacks[0].Outputs' --output table
 ```
 
@@ -147,7 +147,7 @@ aws s3 rm s3://<SiteBucketName>/ --recursive
 
 aws cloudformation delete-stack \
   --region us-east-1 \
-  --stack-name rom-hub-frontend
+  --stack-name schuit-sharing-frontend
 ```
 
 ACM certificates are deleted automatically when no longer in use. The Route 53 hosted zone itself is **not** touched — the stack only created one A-alias record within it.

@@ -67,12 +67,12 @@ The SPA lives under `s3://schuit-sharing/web/`. The CloudFormation stack's
 # Grab from CFN outputs (or hardcode — they won't change)
 SITE_UPLOAD_PATH=$(aws cloudformation describe-stacks \
   --region us-east-1 \
-  --stack-name rom-hub-frontend \
+  --stack-name schuit-sharing-frontend \
   --query "Stacks[0].Outputs[?OutputKey=='SiteUploadPath'].OutputValue" \
   --output text)
 DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
   --region us-east-1 \
-  --stack-name rom-hub-frontend \
+  --stack-name schuit-sharing-frontend \
   --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" \
   --output text)
 
@@ -120,7 +120,7 @@ SPA routing is made to work on CloudFront by mapping 403/404 to `/index.html` (s
 |----------------------------|--------------------------------------------------------------------|----------------------------------------|
 | `VITE_API_BASE`            | `https://sharing.schuit.io/api`                                    | Base URL for API calls                 |
 | `VITE_USER_POOL_CLIENT_ID` | `1a2b3c4d5e6f7g8h`                                                 | Cognito App Client ID                  |
-| `VITE_COGNITO_DOMAIN`      | `https://rom-hub-dev-123.auth.us-east-1.amazoncognito.com`         | Full URL, no trailing slash            |
+| `VITE_COGNITO_DOMAIN`      | `https://schuit-sharing-prod-123.auth.us-east-1.amazoncognito.com` | Full URL, no trailing slash            |
 | `VITE_REDIRECT_URI`        | `https://sharing.schuit.io/auth/callback`                          | Must be registered on the App Client   |
 | `VITE_LOGOUT_REDIRECT`     | `https://sharing.schuit.io/`                                       | Must be registered on the App Client   |
 
