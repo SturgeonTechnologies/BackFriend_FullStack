@@ -157,6 +157,8 @@ Set in `serverless.yml` → `provider.environment`:
 - `SHARES_BUCKET` (default `schuit-sharing`)
 - `BOOTSTRAP_ADMIN_EMAILS` (comma-separated, lowercase)
 - `SITE_ORIGIN` (used only to compose the signup URL returned by `createInvite`)
+- `MAIL_FROM` — visible From: address for invite emails (default `noreply@schuit.io`). Must live inside a verified SES identity provisioned by the `rom-hub-email` stack.
+- `MAIL_REGION` — SES region (default `us-east-1`); must match the email-infra stack's region.
 - `STAGE`
 
 `USER_POOL_ID` is intentionally **not** injected as an env var — it would
@@ -171,4 +173,26 @@ The Lambda execution role has the minimum needed:
 - `dynamodb:*Item`, `Query`, `Scan` on `InvitesTable` + `MountsTable`
 - `s3:ListBucket`, `s3:GetObject` on `arn:aws:s3:::schuit-sharing` + `/*`
 - `cognito-idp:AdminAddUserToGroup`, `AdminListGroupsForUser`, `AdminGetUser` scoped to `userpool/*` (wildcard — using `!GetAtt UserPool.Arn` would create a circular dependency)
+- `ses:SendEmail`, `ses:SendRawEmail` scoped to `arn:aws:ses:us-east-1:<acct>:identity/*` (wildcard for the same coupling reason — the SES identity lives in a separate `rom-hub-email` CFN stack)
 - `ssm:GetParameter` (only during deploy, for the Google creds)
+
+## SES email identity
+
+Outbound invite emails go through SES. The identity is provisioned by a
+**separate** CloudFormation stack (`infrastructure/email-infra.yml`,
+deployed by `infrastructure/email-deploy.sh`) so it can be shared across
+backend stages without pulling DNS records into this stack.
+
+Quick reference (full instructions in `../README.md` step 4b):
+
+```bash
+cd ../infrastructure
+./email-deploy.sh
+# wait 5–60 min for DKIM CNAMEs to verify
+aws ses get-identity-verification-attributes \
+  --region us-east-1 --identities schuit.io
+# new SES accounts start in sandbox: verify a recipient first if testing
+aws ses verify-email-identity --region us-east-1 \
+  --email-address riley.schuit@gmail.com
+# then request production access from the SES console once DKIM is Verified
+```

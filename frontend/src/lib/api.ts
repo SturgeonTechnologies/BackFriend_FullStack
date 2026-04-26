@@ -33,11 +33,32 @@ export interface Invite {
 export function listInvites(idToken: string) {
   return request<{ invites: Invite[] }>("/admin/invites", { idToken });
 }
+/**
+ * Create an invite. Server attempts to send an email to the invitee via
+ * SES (unless body.sendEmail is explicitly false). Even if the email
+ * fails (e.g. SES sandbox + unverified recipient), the invite row is
+ * still persisted, so the admin can fall back to copy-pasting `signupUrl`
+ * to the invitee. The UI surfaces emailSent/emailError accordingly.
+ */
 export function createInvite(
   idToken: string,
-  body: { email: string; groups?: string[]; ttlDays?: number },
+  body: {
+    email: string;
+    groups?: string[];
+    ttlDays?: number;
+    /** Defaults to true on the server. */
+    sendEmail?: boolean;
+  },
 ) {
-  return request<{ email: string; expiresAt: string; groups: string[]; signupUrl: string }>(
+  return request<{
+    email: string;
+    expiresAt: string;
+    groups: string[];
+    signupUrl: string;
+    emailSent: boolean;
+    /** Set when emailSent is false and SES returned an error. */
+    emailError?: string;
+  }>(
     "/admin/invites",
     { method: "POST", idToken, body: JSON.stringify(body) },
   );

@@ -15,14 +15,27 @@ export default function Admin() {
   );
 }
 
+interface InviteResultBanner {
+  kind: "success" | "warning";
+  email: string;
+  signupUrl: string;
+  emailError?: string;
+}
+
 function InvitesCard() {
   const { idToken } = useAuth();
   const [invites, setInvites] = useState<Invite[]>([]);
   const [email, setEmail] = useState("");
   const [makeAdmin, setMakeAdmin] = useState(false);
   const [ttlDays, setTtlDays] = useState(14);
+  const [sendEmail, setSendEmail] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Banner showing whether the invite email actually went out. Persists
+  // until the next create or until the admin dismisses it, so admins can
+  // copy `signupUrl` if SES rejected the send (sandbox / unverified
+  // recipient / DKIM still pending).
+  const [result, setResult] = useState<InviteResultBanner | null>(null);
 
   const refresh = async () => {
     if (!idToken) return;
@@ -34,12 +47,19 @@ function InvitesCard() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setResult(null);
     try {
-      await createInvite(idToken, {
+      const res = await createInvite(idToken, {
         email: email.trim().toLowerCase(),
         groups: makeAdmin ? ["admins"] : [],
         ttlDays,
+        sendEmail,
+      });
+      setResult({
+        kind: res.emailSent || !sendEmail ? "success" : "warning",
+        email: res.email,
+        signupUrl: res.signupUrl,
+        emailError: res.emailError,
       });
       setEmail(""); setMakeAdmin(false);
       await refresh();
@@ -71,14 +91,67 @@ function InvitesCard() {
               <label>Expires (days)</label>
               <input type="number" min={1} max={90} value={ttlDays} onChange={(e) => setTtlDays(Number(e.target.value))} />
             </div>
-            <div style={{ maxWidth: 160 }}>
+            <div style={{ maxWidth: 200 }}>
               <label><input type="checkbox" checked={makeAdmin} onChange={(e) => setMakeAdmin(e.target.checked)} /> Make admin</label>
+              <label style={{ display: "block", marginTop: 4 }}>
+                <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} /> Send invite email
+              </label>
               <button disabled={busy} style={{ marginTop: 8 }}>
                 {busy ? "Creating…" : "Create invite"}
               </button>
             </div>
           </div>
         </form>
+        {result && (
+          <div
+            className={result.kind === "success" ? "banner-ok" : "banner-warn"}
+            style={{
+              marginTop: "0.75rem",
+              padding: "0.75rem",
+              border: "1px solid",
+              borderColor: result.kind === "success" ? "#1f6feb" : "#b58900",
+              background: result.kind === "success" ? "#f0f6ff" : "#fff8e1",
+              borderRadius: 6,
+              fontSize: 14,
+            }}
+          >
+            {result.kind === "success" && sendEmail && (
+              <div>Invite created and email sent to <strong>{result.email}</strong>.</div>
+            )}
+            {result.kind === "success" && !sendEmail && (
+              <>
+                <div>Invite created for <strong>{result.email}</strong> (no email sent).</div>
+                <div style={{ marginTop: 4 }}>
+                  Share this link manually:{" "}
+                  <code style={{ wordBreak: "break-all" }}>{result.signupUrl}</code>
+                </div>
+              </>
+            )}
+            {result.kind === "warning" && (
+              <>
+                <div>
+                  Invite created for <strong>{result.email}</strong>, but the email failed to send.
+                </div>
+                {result.emailError && (
+                  <div style={{ marginTop: 4, fontSize: 13, color: "#7a5a00" }}>
+                    SES error: <code>{result.emailError}</code>
+                  </div>
+                )}
+                <div style={{ marginTop: 4 }}>
+                  Share this link manually:{" "}
+                  <code style={{ wordBreak: "break-all" }}>{result.signupUrl}</code>
+                </div>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setResult(null)}
+              style={{ marginTop: 8 }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {err && <p className="err">{err}</p>}
       </div>
 

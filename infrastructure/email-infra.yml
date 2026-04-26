@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  SES domain identity for sending invite emails from noreply@schuit.io.
+
+  This stack is deliberately scoped so it can coexist with Google Workspace
+  on the *same* root domain (schuit.io). It does NOT touch the root MX or
+  root SPF — those belong to Google. Specifically it creates:
+
+    - An SES domain identity for `schuit.io` with EasyDKIM enabled. SES
+      mints three DKIM key pairs and exposes their CNAME targets via
+      DkimDNSTokenName1/2/3 + DkimDNSTokenValue1/2/3 attributes. Each
+      selector lives at <token>._domainkey.schuit.io and is unique to SES,
+      so it does not conflict with Google's google._domainkey.schuit.io.
+
+    - A custom MAIL FROM domain on `mail.schuit.io` (a *subdomain*) with
+      its own MX and SPF. SES's bounce/complaint envelope (Return-Path)
+      uses noreply@mail.schuit.io while the visible From: header still
+      reads noreply@schuit.io. DKIM alignment + the matching DKIM key on
+      the parent identity = DMARC-compliant delivery without disturbing
+      Google's MX records on the apex.
+
+    - Three Route 53 CNAMEs (DKIM), one MX, and one TXT (SPF) on the
+      `mail.schuit.io` subdomain.
+
+  Order of operations:
+    1. Deploy this stack. CloudFormation creates the records and SES marks
+       the identity "Pending" for verification.
+    2. Wait 5–60 minutes (often <15) for SES to detect the DKIM CNAMEs
+       and flip the identity to Verified.
+    3. After that, `aws ses get-identity-verification-attributes` shows
+       VerificationStatus=Success and DKIM tokens are Verified.
+
+  Sandbox warning:
+    A new SES account in us-east-1 starts in *sandbox* mode. In sandbox you
+    can ONLY send to verified email addresses (and only 200 messages/24h,
+    1/sec). Verify riley.schuit@gmail.com as a recipient identity for
+    initial testing, then request production access in the SES console:
+      https://console.aws.amazon.com/ses/home?region=us-east-1#/account
+    Once granted, you can send to any address.
+
+  Region: deploy to us-east-1 (the same region as the Lambdas; SES is a
+  regional service and the Lambda IAM role grants ses:SendEmail to the
+  us-east-1 endpoint).
+
+Parameters:
+  Domain:
+    Type: String
+    Default: schuit.io
+    Description: "Root domain to register as the SES sending identity. Must match the From: address domain (noreply@${Domain})."
+  MailFromSubdomain:
+    Type: String
+    Default: mail
+    Description: Subdomain label used for the SES custom MAIL FROM. Final FQDN = ${MailFromSubdomain}.${Domain}. Must NOT collide with anything Workspace uses.
+  HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone ID for ${Domain}.
+  Region:
+    Type: String
+    Default: us-east-1
+    Description: Region whose SES endpoint is being verified. The MAIL FROM MX target depends on this (feedback-smtp.<region>.amazonses.com).
+
+Resources:
+  # ---------- SES domain identity with EasyDKIM + custom MAIL FROM ----------
+  EmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref Domain
+      DkimAttributes:
+        SigningEnabled: true
+      DkimSigningAttributes:
+        NextSigningKeyLength: RSA_2048_BIT
+      MailFromAttributes:
+        MailFromDomain: !Sub "${MailFromSubdomain}.${Domain}"
+        # If MAIL FROM DNS is misconfigured, SES will REJECT the send rather
+        # than silently fall back to amazonses.com — that's the safe default
+        # since silent fallback breaks DMARC alignment.
+        BehaviorOnMxFailure: REJECT_MESSAGE
+      FeedbackAttributes:
+        EmailForwardingEnabled: true
+
+  # ---------- DKIM CNAMEs (3) ----------
+  # SES exposes the three DKIM records as DkimDNSTokenName1..3 /
+  # DkimDNSTokenValue1..3 attributes on the EmailIdentity. Each Name is the
+  # full hostname (e.g. abcd1234._domainkey.schuit.io) and each Value is the
+  # CNAME target (e.g. abcd1234.dkim.amazonses.com).
+  DkimRecord1:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${EmailIdentity.DkimDNSTokenName1}."
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords:
+        - !GetAtt EmailIdentity.DkimDNSTokenValue1
+
+  DkimRecord2:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${EmailIdentity.DkimDNSTokenName2}."
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords:
+        - !GetAtt EmailIdentity.DkimDNSTokenValue2
+
+  DkimRecord3:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${EmailIdentity.DkimDNSTokenName3}."
+      Type: CNAME
+      TTL: "1800"
+      ResourceRecords:
+        - !GetAtt EmailIdentity.DkimDNSTokenValue3
+
+  # ---------- Custom MAIL FROM (mail.schuit.io) ----------
+  # MX: SES bounce/complaint receiver for the configured region.
+  MailFromMx:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${MailFromSubdomain}.${Domain}."
+      Type: MX
+      TTL: "1800"
+      ResourceRecords:
+        - !Sub "10 feedback-smtp.${Region}.amazonses.com"
+
+  # SPF for the MAIL FROM subdomain only. We deliberately do NOT touch the
+  # apex SPF record (which Google Workspace owns). DMARC alignment uses the
+  # DKIM identity at the apex (signed by SES via the EasyDKIM keys), so
+  # this MAIL-FROM SPF only needs to pass on its own subdomain.
+  MailFromSpf:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${MailFromSubdomain}.${Domain}."
+      Type: TXT
+      TTL: "1800"
+      ResourceRecords:
+        - '"v=spf1 include:amazonses.com ~all"'
+
+Outputs:
+  IdentityArn:
+    Value: !GetAtt EmailIdentity.Arn
+    Description: ARN of the SES email identity. Reference this in IAM ses:SendEmail Resource conditions if you want to scope tightly.
+  IdentityName:
+    Value: !Ref Domain
+    Description: SES identity name (the verified domain).
+  MailFromDomain:
+    Value: !Sub "${MailFromSubdomain}.${Domain}"
+    Description: "Custom MAIL FROM domain. Lambdas should set MAIL_FROM=noreply@${Domain} (the visible From:), not this subdomain."
+  FromAddress:
+    Value: !Sub "noreply@${Domain}"
+    Description: "Suggested From: address for outbound mail (matches the verified identity)."
+  Region:
+    Value: !Ref Region
+    Description: SES region this identity was created in. Backend MAIL_REGION env var must match.
+  SandboxNote:
+    Value: "New SES accounts start in sandbox: only verified recipients work. Request production access in the SES console after DKIM verifies."

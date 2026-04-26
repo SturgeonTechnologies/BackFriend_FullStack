@@ -26,7 +26,8 @@ rom-hub/
 │       ├── lib/                  auth (OAuth + PKCE), API client, pkce helpers
 │       └── pages/                Login, Callback, Home, Browse, Admin
 └── infrastructure/
-    └── frontend-infra.yml        CloudFormation: ACM + S3 + CloudFront + Route 53
+    ├── frontend-infra.yml        CloudFormation: ACM + S3 + CloudFront + Route 53
+    └── email-infra.yml           CloudFormation: SES domain identity + DKIM + MAIL FROM
 ```
 
 ## Architecture
@@ -195,6 +196,93 @@ Outputs:
 > inside `frontend-infra.yml` and redeploy. Lambda access to ROM files
 > uses IAM (not the bucket policy), so this doesn't affect the backend.
 
+## 4b. Deploy the SES email stack (for invite emails)
+
+`infrastructure/email-infra.yml` creates the SES sending identity for
+`schuit.io` so the backend can email invitees from `noreply@schuit.io`.
+It coexists with Google Workspace on the same root domain because:
+
+- DKIM uses unique selector subdomains (`<token>._domainkey.schuit.io`),
+  not Google's `google._domainkey.schuit.io`. They don't collide.
+- The custom **MAIL FROM** lives on a *subdomain* (`mail.schuit.io`), with
+  its own MX (`feedback-smtp.us-east-1.amazonses.com`) and SPF
+  (`v=spf1 include:amazonses.com ~all`). The root domain's MX (Google) and
+  any root SPF stay untouched.
+- Outbound mail still says `From: noreply@schuit.io` and is DKIM-signed
+  by the apex identity, so DMARC alignment passes.
+
+Deploy:
+
+```bash
+cd infrastructure
+./email-deploy.sh
+```
+
+Or manually:
+
+```bash
+HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
+aws cloudformation deploy \
+  --region us-east-1 \
+  --stack-name rom-hub-email \
+  --template-file infrastructure/email-infra.yml \
+  --parameter-overrides \
+      Domain=schuit.io \
+      MailFromSubdomain=mail \
+      HostedZoneId=$HOSTED_ZONE_ID \
+      Region=us-east-1 \
+  --capabilities CAPABILITY_IAM
+```
+
+### Wait for DKIM verification
+
+DKIM CNAMEs propagate, then SES detects them and flips the identity to
+**Verified**. Typical wait: 5–60 minutes. Poll:
+
+```bash
+aws ses get-identity-verification-attributes \
+  --region us-east-1 \
+  --identities schuit.io \
+  --query 'VerificationAttributes."schuit.io".VerificationStatus' \
+  --output text
+```
+
+`Success` means you're good to send.
+
+### Sandbox mode (one-time gate)
+
+A new SES account is in **sandbox**: you can only send to *verified*
+recipient addresses (max 200 messages/day, 1/sec). For initial testing,
+verify your own inbox:
+
+```bash
+aws ses verify-email-identity --region us-east-1 \
+  --email-address riley.schuit@gmail.com
+# (click the link in the email AWS sends you)
+```
+
+Then **request production access** in the SES console (one-form,
+usually granted within 24h):
+<https://console.aws.amazon.com/ses/home?region=us-east-1#/account>
+
+After production access is granted, sandbox restrictions disappear and
+the backend can email any invitee.
+
+### Redeploy backend so MAIL_FROM lands
+
+`backend/serverless.yml` now sets `MAIL_FROM=noreply@schuit.io`,
+`MAIL_REGION=us-east-1`, and grants Lambdas `ses:SendEmail`. Redeploy:
+
+```bash
+cd backend
+npx serverless deploy --stage dev
+```
+
+That's it — the **Invite a user** form on `/admin` now sends an email by
+default. If SES rejects the send (sandbox: unverified recipient, identity
+not yet DKIM-verified, throttled), the invite row is still written and
+the form shows the `signupUrl` so you can copy/paste it manually.
+
 ## 5. Build & upload the frontend
 
 ```bash
@@ -246,6 +334,11 @@ In Admin → **Invite a user**:
 - Email must match the Google account they'll sign in with
 - Pick a TTL (14 days default)
 - Optionally check **Make admin** to give them admin rights on first sign-in
+- **Send invite email** is on by default — the invitee gets an email from
+  `noreply@schuit.io` with the signup link. Uncheck it if you want to
+  share the link out-of-band (Slack, etc.). If SES is still in sandbox
+  and the recipient isn't verified, the form shows a warning + the link
+  so you can paste it yourself.
 
 They just go to https://sharing.schuit.io and click **Sign in with Google**. The `preSignUp` Lambda trigger lets them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and marks the invite redeemed.
 

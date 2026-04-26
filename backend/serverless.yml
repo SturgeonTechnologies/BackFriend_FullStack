@@ -23,6 +23,13 @@ provider:
     BOOTSTRAP_ADMIN_EMAILS: ${self:custom.bootstrapAdmins}
     SHARES_BUCKET: ${self:custom.sharesBucket}
     SITE_ORIGIN: ${self:custom.siteOrigin.${self:provider.stage}, self:custom.siteOrigin.default}
+    # SES outbound mail. The identity itself is provisioned by the
+    # `rom-hub-email` CFN stack (see infrastructure/email-infra.yml). We do
+    # NOT make this stack depend on it — the identity is shared, lives in
+    # its own stack, and verifies asynchronously. Lambdas just need the
+    # From address + region.
+    MAIL_FROM: ${self:custom.mailFrom}
+    MAIL_REGION: ${self:custom.mailRegion}
   httpApi:
     cors:
       allowedOrigins: ${self:custom.allowedOrigins.${self:provider.stage}, self:custom.allowedOrigins.default}
@@ -79,6 +86,18 @@ provider:
             - cognito-idp:AdminGetUser
           Resource:
             - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+        # SES: send invite emails. Resource is wildcarded to all identities
+        # in this account/region — the SES identity (schuit.io) is owned by
+        # a separate CFN stack (rom-hub-email), so referring to it by ARN
+        # would couple the two stacks. The Lambda code only ever calls
+        # SendEmail with `From: ${MAIL_FROM}`, so an attacker would need
+        # code-exec on the Lambda to abuse this scope.
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource:
+            - !Sub "arn:aws:ses:${self:custom.mailRegion}:${AWS::AccountId}:identity/*"
 
 custom:
   # Comma-separated list of emails that are auto-promoted to admins on first sign-in.
@@ -103,6 +122,14 @@ custom:
   # Cognito hosted-UI prefix domain. Must be globally unique within the region.
   # Final domain: https://${domainPrefix}.auth.${region}.amazoncognito.com
   cognitoDomainPrefix: ${self:service}-${self:provider.stage}-${aws:accountId}
+
+  # SES sender. The visible From: address; must be a verified address inside
+  # a verified identity. The `rom-hub-email` stack verifies the *domain*
+  # `schuit.io`, which auto-permits any localpart@schuit.io.
+  mailFrom: noreply@schuit.io
+  # SES region. Must match the region the email-infra stack was deployed
+  # into (us-east-1) — SES is regional and identities don't replicate.
+  mailRegion: us-east-1
 
   # Google OAuth credentials — stored in SSM Parameter Store, NOT in this file.
   #   aws ssm put-parameter --name /rom-hub/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"

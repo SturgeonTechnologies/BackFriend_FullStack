@@ -3,11 +3,19 @@ import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, INVITES_TABLE } from "../../lib/db";
 import { requireAdmin } from "../../lib/auth";
 import { created, error, parseJson } from "../../lib/response";
+import { sendInviteEmail } from "../../lib/email";
 
 interface Body {
   email: string;
   groups?: string[]; // e.g. ["admins"]
   ttlDays?: number;
+  /**
+   * If true (default), also send an invite email via SES. If false, the
+   * row is written to DynamoDB but no email is sent — useful when the SES
+   * identity isn't verified yet, or when an admin just wants the
+   * `signupUrl` to copy/paste.
+   */
+  sendEmail?: boolean;
 }
 
 export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
@@ -48,11 +56,38 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     );
 
     const siteOrigin = process.env.SITE_ORIGIN ?? "http://localhost:5173";
+    const signupUrl = siteOrigin; // invitee just goes to the site and clicks "Sign in with Google"
+
+    // Send the invite email by default. We do this *after* the DynamoDB
+    // Put succeeds — if SES fails (sandbox: unverified recipient, DKIM
+    // still pending, throttled, etc.) the invite is still recorded and
+    // the admin can fall back to copy/pasting `signupUrl` manually.
+    let emailSent = false;
+    let emailError: string | undefined;
+    const wantEmail = body.sendEmail !== false;
+    if (wantEmail) {
+      const result = await sendInviteEmail({
+        to: email,
+        signupUrl,
+        invitedBy: caller.email ?? null,
+        expiresAt: item.expiresAt,
+      });
+      if (result.ok) {
+        emailSent = true;
+      } else {
+        emailError = result.error;
+        // Don't fail the request — the invite row is already persisted.
+        console.warn(`SES sendInviteEmail failed for ${email}: ${result.error}`);
+      }
+    }
+
     return created({
       email,
       expiresAt: item.expiresAt,
       groups: item.groups,
-      signupUrl: siteOrigin, // invitee just goes to the site and clicks "Sign in with Google"
+      signupUrl,
+      emailSent,
+      emailError,
     });
   } catch (e: any) {
     if (e.name === "ConditionalCheckFailedException") {
