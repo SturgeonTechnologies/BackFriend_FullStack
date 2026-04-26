@@ -3,7 +3,12 @@ import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, MOUNTS_TABLE } from "../../lib/db";
 import { requireAdmin } from "../../lib/auth";
 import { created, error, parseJson } from "../../lib/response";
-import { isValidMountPath, normalizeMountPath, normalizePrefix } from "../../lib/mounts";
+import {
+  isValidMountPath,
+  normalizeMountPath,
+  normalizePrefix,
+  normalizeAllowedEmails,
+} from "../../lib/mounts";
 
 interface Body {
   mountPath: string;   // e.g. "roms"
@@ -11,6 +16,11 @@ interface Body {
   prefix: string;      // e.g. "Video_Game_ROMs/"
   displayName: string; // e.g. "Video Game ROMs"
   description?: string;
+  /**
+   * Optional list of emails allowed to see this mount. If omitted or empty,
+   * mount is visible to every authenticated user. Admins always see it.
+   */
+  allowedEmails?: string[];
 }
 
 export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
@@ -28,8 +38,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
 
     const bucket = body.bucket?.trim() || process.env.SHARES_BUCKET!;
     const prefix = normalizePrefix(body.prefix ?? "");
+    const allowedEmails = normalizeAllowedEmails(body.allowedEmails);
 
-    const item = {
+    const item: Record<string, unknown> = {
       mountPath,
       bucket,
       prefix,
@@ -38,6 +49,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       createdBy: caller.email ?? caller.sub,
       createdAt: new Date().toISOString(),
     };
+    if (allowedEmails) item.allowedEmails = allowedEmails;
 
     await ddb.send(
       new PutCommand({

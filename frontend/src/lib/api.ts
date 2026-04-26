@@ -54,10 +54,24 @@ export interface Mount {
   mountPath: string;
   displayName: string;
   description: string;
+  /**
+   * Only populated when the caller is an admin. If undefined or empty, the
+   * mount is visible to every authenticated user; otherwise only listed
+   * lowercase emails (plus admins) can see it.
+   */
+  allowedEmails?: string[];
 }
 export function createMount(
   idToken: string,
-  body: { mountPath: string; prefix: string; displayName: string; description?: string; bucket?: string },
+  body: {
+    mountPath: string;
+    prefix: string;
+    displayName: string;
+    description?: string;
+    bucket?: string;
+    /** Optional access control. Empty/omitted = visible to everyone. */
+    allowedEmails?: string[];
+  },
 ) {
   return request<Mount>("/admin/mounts", {
     method: "POST",

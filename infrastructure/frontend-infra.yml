@@ -110,30 +110,49 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
             # Pass Authorization + CORS headers through.
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
+        # No global CustomErrorResponses. SPA fallback is handled in the
+        # CloudFront Function below (only for non-asset paths), so a missing
+        # /assets/foo.js correctly returns 404 instead of being silently
+        # rewritten to index.html (which causes the browser to parse HTML as
+        # JS and the app to fail to boot).
 
-  # Rewrite /api/foo -> /foo for the API Gateway origin.
-  # (Viewer-request CloudFront Function runs on every request and short-circuits path rewriting.)
+  # CloudFront Function (viewer-request) that handles two things:
+  #   1. /api/* requests get the "/api" prefix stripped before being sent
+  #      to the API Gateway origin.
+  #   2. SPA fallback: any request that has no file extension (e.g. /admin,
+  #      /browse/roms) is rewritten to /index.html so React Router can
+  #      handle it. Requests for files (anything containing a "." in the
+  #      last path segment, like /assets/index-abc.js or /favicon.ico)
+  #      pass through untouched, so a real missing asset surfaces as 404.
   SpaRewriteFunction:
     Type: AWS::CloudFront::Function
     Properties:
       Name: !Sub "${AWS::StackName}-rewrite"
       AutoPublish: true
       FunctionConfig:
-        Comment: Strip /api prefix when forwarding to API Gateway
+        Comment: Strip /api prefix and serve index.html for SPA routes
         Runtime: cloudfront-js-2.0
       FunctionCode: |
         function handler(event) {
           var req = event.request;
-          if (req.uri.indexOf('/api/') === 0) {
-            req.uri = req.uri.substring(4); // drop "/api"
+          var uri = req.uri;
+
+          // 1) /api/* -> drop the "/api" prefix before forwarding to API Gateway.
+          if (uri.indexOf('/api/') === 0) {
+            req.uri = uri.substring(4);
+            return req;
           }
+
+          // 2) SPA fallback: if the last path segment has no ".", treat it
+          //    as a virtual route and serve index.html. Real files (which
+          //    always have an extension after Vite's hashed build, e.g.
+          //    /assets/index-abc.js, /favicon.ico) fall through untouched.
+          var lastSlash = uri.lastIndexOf('/');
+          var lastSegment = uri.substring(lastSlash + 1);
+          if (lastSegment.indexOf('.') === -1) {
+            req.uri = '/index.html';
+          }
+
           return req;
         }
 

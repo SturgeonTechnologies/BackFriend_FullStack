@@ -117,8 +117,15 @@ function MountsCard() {
   const [prefix, setPrefix] = useState("Video_Game_ROMs/");
   const [bucket, setBucket] = useState("");
   const [description, setDescription] = useState("");
+  const [allowedEmailsRaw, setAllowedEmailsRaw] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const parseEmails = (raw: string): string[] =>
+    raw
+      .split(/[\s,;]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0);
 
   const refresh = async () => {
     if (!idToken) return;
@@ -132,13 +139,16 @@ function MountsCard() {
     if (!idToken) return;
     setBusy(true); setErr(null);
     try {
+      const emails = parseEmails(allowedEmailsRaw);
       await createMount(idToken, {
         mountPath: mountPath.trim(),
         displayName: displayName.trim(),
         prefix: prefix.trim(),
         description: description.trim() || undefined,
         bucket: bucket.trim() || undefined,
+        allowedEmails: emails.length ? emails : undefined,
       });
+      setAllowedEmailsRaw("");
       await refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setBusy(false); }
@@ -183,6 +193,19 @@ function MountsCard() {
             <label>Description (optional)</label>
             <input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
+          <div style={{ marginTop: "0.75rem" }}>
+            <label>
+              Allowed emails (optional, comma-separated)
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                — leave blank to share with all signed-in users. Admins always see every mount.
+              </span>
+            </label>
+            <input
+              value={allowedEmailsRaw}
+              onChange={(e) => setAllowedEmailsRaw(e.target.value)}
+              placeholder="alice@example.com, bob@example.com"
+            />
+          </div>
           <button disabled={busy} style={{ marginTop: "0.75rem" }}>
             {busy ? "Adding…" : "Add mount"}
           </button>
@@ -193,17 +216,24 @@ function MountsCard() {
       <div className="card">
         <h3>Mounts</h3>
         <table>
-          <thead><tr><th>Path</th><th>Display name</th><th>Description</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Path</th><th>Display name</th><th>Description</th><th>Shared with</th><th></th>
+          </tr></thead>
           <tbody>
             {mounts.map((m) => (
               <tr key={m.mountPath}>
                 <td><code>/{m.mountPath}</code></td>
                 <td>{m.displayName}</td>
                 <td className="muted">{m.description || "—"}</td>
+                <td className="muted">
+                  {m.allowedEmails && m.allowedEmails.length
+                    ? m.allowedEmails.join(", ")
+                    : "everyone"}
+                </td>
                 <td><button className="danger" onClick={() => handleDelete(m.mountPath)}>Delete</button></td>
               </tr>
             ))}
-            {!mounts.length && <tr><td colSpan={4} className="muted">No mounts yet.</td></tr>}
+            {!mounts.length && <tr><td colSpan={5} className="muted">No mounts yet.</td></tr>}
           </tbody>
         </table>
       </div>

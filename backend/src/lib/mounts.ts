@@ -1,5 +1,6 @@
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, MOUNTS_TABLE, MountRow } from "./db";
+import type { CallerIdentity } from "./auth";
 
 const VALID_PATH = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -37,4 +38,46 @@ export async function getMount(mountPath: string): Promise<MountRow | null> {
     new GetCommand({ TableName: MOUNTS_TABLE, Key: { mountPath } }),
   );
   return (res.Item as MountRow | undefined) ?? null;
+}
+
+/**
+ * Returns true if the given caller is allowed to see / browse this mount.
+ *
+ * Rules:
+ *   - Admins always see everything.
+ *   - If the mount has no `allowedEmails` (undefined or empty), it is public
+ *     to every authenticated user.
+ *   - Otherwise, only callers whose email (lowercased) appears in the list
+ *     are allowed.
+ */
+export function canSeeMount(caller: CallerIdentity, mount: MountRow): boolean {
+  if (caller.isAdmin) return true;
+  if (!mount.allowedEmails || mount.allowedEmails.length === 0) return true;
+  if (!caller.email) return false;
+  return mount.allowedEmails.includes(caller.email.toLowerCase());
+}
+
+/**
+ * Normalize a user-supplied list of allowed emails:
+ *   - coerce to string, trim, lowercase
+ *   - drop empties
+ *   - dedupe while preserving order
+ *   - return undefined if the resulting list is empty (so the column is
+ *     omitted from DynamoDB rather than stored as `[]`)
+ */
+export function normalizeAllowedEmails(input: unknown): string[] | undefined {
+  if (input === undefined || input === null) return undefined;
+  const arr = Array.isArray(input) ? input : [];
+  const cleaned = arr
+    .map((s) => String(s ?? "").trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const e of cleaned) {
+    if (!seen.has(e)) {
+      seen.add(e);
+      deduped.push(e);
+    }
+  }
+  return deduped.length > 0 ? deduped : undefined;
 }

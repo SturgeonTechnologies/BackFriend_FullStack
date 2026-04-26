@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyHandlerV2WithJWTAuthorizer } from "aws-lambda";
 import { getCaller } from "../../lib/auth";
 import { ok, error } from "../../lib/response";
-import { getMount, normalizeMountPath, safeSubpath } from "../../lib/mounts";
+import { canSeeMount, getMount, normalizeMountPath, safeSubpath } from "../../lib/mounts";
 import { listDir } from "../../lib/s3";
 
 /**
@@ -22,6 +22,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
 
     const mount = await getMount(mountPath);
     if (!mount) return error(404, "Mount not found");
+    if (!canSeeMount(caller, mount)) return error(403, "Forbidden");
 
     let sub = "";
     try {

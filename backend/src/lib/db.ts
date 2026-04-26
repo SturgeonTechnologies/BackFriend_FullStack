@@ -25,6 +25,12 @@ export interface MountRow {
   prefix: string;      // e.g. "Video_Game_ROMs/"  (always ends with "/")
   displayName: string; // e.g. "Video Game ROMs"
   description?: string;
+  /**
+   * Optional access control. If undefined or empty, the mount is visible to
+   * every authenticated user. If non-empty, only listed lowercase emails
+   * (plus admins, who always see everything) can see / browse it.
+   */
+  allowedEmails?: string[];
   createdBy: string;
   createdAt: string;
 }
