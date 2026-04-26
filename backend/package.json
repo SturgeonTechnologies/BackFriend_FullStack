@@ -5,13 +5,17 @@
   "scripts": {
     "deploy": "serverless deploy",
     "deploy:prod": "serverless deploy --stage prod",
+    "wire-triggers": "node scripts/wire-cognito-triggers.mjs",
+    "wire-triggers:prod": "STAGE=prod node scripts/wire-cognito-triggers.mjs",
     "remove": "serverless remove",
     "logs": "serverless logs -f",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.600.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.600.0",
     "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-lambda": "^3.600.0",
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/lib-dynamodb": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0"

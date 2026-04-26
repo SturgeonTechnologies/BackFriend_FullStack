@@ -40,7 +40,7 @@ npx serverless deploy --stage dev
 
 This provisions:
 
-- `UserPool` — Cognito User Pool with Google as external IdP
+- `UserPool` — Cognito User Pool with Google as external IdP (created **without** Lambda triggers — see step 3)
 - `UserPoolClient` — OAuth code + PKCE, callback URLs wired to both prod (`https://sharing.schuit.io/auth/callback`) and dev (`http://localhost:5173/auth/callback`)
 - `UserPoolDomain` — hosted UI domain (Amazon-provided: `rom-hub-<stage>-<acct>.auth.<region>.amazoncognito.com`)
 - `InvitesTable` (DynamoDB, email PK, TTL)
@@ -48,7 +48,48 @@ This provisions:
 - Lambdas: `preSignUp`, `postAuth`, `createInvite`, `listInvites`, `revokeInvite`, `createMount`, `deleteMount`, `listMounts`, `browseList`, `browseDownloadUrl`
 - HTTP API with a JWT authorizer pointing at the User Pool
 
-## 3. Capture outputs
+## 3. Wire the Cognito Lambda triggers
+
+The `preSignUp` and `postAuth` Lambdas can't be wired into the UserPool's
+`LambdaConfig` from CloudFormation — doing so creates a circular dependency
+(UserPool → trigger Lambdas → IAM role + HttpApi authorizer → UserPool).
+Instead, run the post-deploy script. It's idempotent — safe to re-run after
+every deploy.
+
+```bash
+npm run wire-triggers          # stage=dev (default)
+# or
+npm run wire-triggers:prod
+```
+
+Output:
+
+```
+==> Looking up resources from stack rom-hub-dev in us-east-1
+    UserPoolId       = us-east-1_XXXXXXXXX
+    PreSignUp ARN    = arn:aws:lambda:us-east-1:...:function:rom-hub-dev-preSignUp
+    PostAuth ARN     = arn:aws:lambda:us-east-1:...:function:rom-hub-dev-postAuth
+==> Fetching current UserPool config
+==> Updating UserPool with new LambdaConfig
+==> Done. Triggers are now wired:
+    PreSignUp:          arn:aws:lambda:us-east-1:...:rom-hub-dev-preSignUp
+    PostAuthentication: arn:aws:lambda:us-east-1:...:rom-hub-dev-postAuth
+```
+
+The script reads the current pool config and re-passes everything (because
+`UpdateUserPool` resets fields you don't include) plus the new `LambdaConfig`.
+Lambda `InvokeFunction` permissions for the Cognito principal are already
+granted by the CloudFormation stack — the script only sets the `LambdaConfig`.
+
+> **You must run this once after the first deploy** for sign-in to work.
+> Sign-in will succeed on the Cognito side but no admins will be auto-bootstrapped
+> (and any future invite-based users won't be gated) until the triggers are wired.
+
+If you re-run `serverless deploy` and the trigger ARNs don't change (they
+won't unless you rename the functions or change the stage), `UpdateUserPool`
+won't be called.
+
+## 4. Capture outputs
 
 ```bash
 npx serverless info --stage dev
@@ -64,7 +105,7 @@ Write these down — they're needed by the frontend `.env.local` and the CloudFo
 | `ApiEndpoint`       | `infrastructure/frontend-infra.yml` `ApiGatewayDomain` param (use host portion only) |
 | `SharesBucketName`  | (diagnostic — this is the external bucket the app reads from, defaults to `schuit-sharing`) |
 
-## 4. Finish Google OAuth wiring
+## 5. Finish Google OAuth wiring
 
 Copy the `CognitoDomain` host. In Google Cloud Console → OAuth client, add to authorized redirect URIs:
 
@@ -74,7 +115,7 @@ https://<cognito-domain>/oauth2/idpresponse
 
 Without this, the "Sign in with Google" flow will fail with `redirect_uri_mismatch`.
 
-## 5. Bootstrap admin (automatic)
+## 6. Bootstrap admin (automatic)
 
 `riley.schuit@gmail.com` is set as the bootstrap admin via `BOOTSTRAP_ADMIN_EMAILS` in `serverless.yml`. On first sign-in:
 
@@ -112,10 +153,16 @@ npx serverless logs --function browseList --stage dev --tail
 Set in `serverless.yml` → `provider.environment`:
 
 - `INVITES_TABLE`, `MOUNTS_TABLE`
-- `USER_POOL_ID`
+- `ADMIN_GROUP` (default `admins`)
 - `SHARES_BUCKET` (default `schuit-sharing`)
 - `BOOTSTRAP_ADMIN_EMAILS` (comma-separated, lowercase)
 - `SITE_ORIGIN` (used only to compose the signup URL returned by `createInvite`)
+- `STAGE`
+
+`USER_POOL_ID` is intentionally **not** injected as an env var — it would
+make every Lambda DependOn `UserPool`, recreating the circular dependency
+that step 3 exists to break. The Cognito trigger Lambdas read the pool ID
+from `event.userPoolId` (which Cognito provides on every invocation).
 
 ## IAM surface
 
@@ -123,5 +170,5 @@ The Lambda execution role has the minimum needed:
 
 - `dynamodb:*Item`, `Query`, `Scan` on `InvitesTable` + `MountsTable`
 - `s3:ListBucket`, `s3:GetObject` on `arn:aws:s3:::schuit-sharing` + `/*`
-- `cognito-idp:AdminAddUserToGroup`, `AdminListGroupsForUser`, `AdminGetUser` on the User Pool
+- `cognito-idp:AdminAddUserToGroup`, `AdminListGroupsForUser`, `AdminGetUser` scoped to `userpool/*` (wildcard — using `!GetAtt UserPool.Arn` would create a circular dependency)
 - `ssm:GetParameter` (only during deploy, for the Google creds)

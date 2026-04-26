@@ -175,6 +175,12 @@ resources:
     # ---------- Cognito ----------
     UserPool:
       Type: AWS::Cognito::UserPool
+      # NOTE: LambdaConfig is intentionally absent. Putting it here makes
+      # UserPool depend on the trigger Lambda functions, which depend on
+      # IamRoleLambdaExecution, which (combined with the HttpApi authorizer
+      # that references UserPool) creates an unbreakable CloudFormation
+      # circular dependency. Triggers are wired post-deploy via
+      # `scripts/wire-cognito-triggers.mjs` (see backend/README.md).
       Properties:
         UserPoolName: ${self:service}-${self:provider.stage}
         UsernameAttributes: [email]
@@ -191,9 +197,6 @@ resources:
             RequireSymbols: false
         Schema:
           - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
-        LambdaConfig:
-          PreSignUp: !GetAtt PreSignUpLambdaFunction.Arn
-          PostAuthentication: !GetAtt PostAuthLambdaFunction.Arn
 
     PreSignUpInvokePermission:
       Type: AWS::Lambda::Permission
