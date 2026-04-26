@@ -110,6 +110,14 @@ Resources:
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
             # Pass Authorization + CORS headers through.
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
+            # CRITICAL: same SpaRewriteFunction as the default behavior.
+            # Without this, requests to /api/mounts hit API Gateway with the
+            # literal "/api/" prefix still attached, and API Gateway 404s
+            # because its routes are /mounts, /admin/*, /browse/*. The
+            # function strips "/api" before forwarding to the api-gw origin.
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
         # No global CustomErrorResponses. SPA fallback is handled in the
         # CloudFront Function below (only for non-asset paths), so a missing
         # /assets/foo.js correctly returns 404 instead of being silently
