@@ -3,9 +3,12 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** SES invite emails are wired up in code but the end-to-end
-> send hasn't been verified yet — see [`TODO.md`](./TODO.md) for the
-> diagnostic checklist and pick this up in the next session.
+> **Status:** SES invite email send is verified end-to-end as of
+> 2026-04-26 (admin gate passes, invite written to DDB, email
+> delivered). SES is still in *sandbox* mode — only verified
+> recipients can receive mail until production access is requested
+> via the SES console. See [`TODO.md`](./TODO.md) for that and the
+> next planned item (real staging environment + GitHub Actions CD).
 
 - Auth: **Cognito + Google federation** (sign in with Google)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)

@@ -22,6 +22,83 @@ delete the line, when they're done.
       without the trailing slash, either fix the client to include it
       or relax LogoutURLs in `serverless.yml` to register both forms.
 
+- [ ] **Stand up a real staging environment + GitHub Actions CD.**
+      Decision pending — Riley wants to think about it. Captured plan:
+
+      **Domain layout.** Keep `sharing.schuit.io` as prod. Add a
+      sibling `sharing-staging.schuit.io` for staging. Sibling
+      (rather than `staging.sharing.schuit.io`) keeps cookie/storage
+      isolation simple and avoids a wildcard cert. Two ACM certs in
+      us-east-1 (one per CloudFront distribution) is the cleanest
+      blast-radius split; a single multi-SAN cert across both also
+      works.
+
+      **Backend.** Already mostly stage-aware (User Pool, DDB tables,
+      Cognito domain prefix all stage-suffixed). Per-stage maps in
+      `serverless.yml custom.*` need staging entries:
+      `allowedOrigins`, `siteOrigin`, `bootstrapAdmins`,
+      `cognitoCallbackURLs`, `cognitoLogoutURLs`. Per-stage SSM Google
+      creds at `/rom-hub/staging/google/{client_id,client_secret}`
+      and `/rom-hub/prod/...`.
+
+      **The "dev = prod" naming problem.** The existing `dev` stage
+      is what's serving sharing.schuit.io publicly. Two paths: (a)
+      relabel `dev` as prod going forward (no migration; ugly name),
+      or (b) deploy a fresh `prod` stage and migrate DNS + Google
+      OAuth redirects + bootstrap-admin sign-in (clean; one-time
+      pain). Recommendation was (a) for pragmatism.
+
+      **Frontend infra.** `infrastructure/frontend-infra.yml` is the
+      gating change — currently has hardcoded values for the prod
+      domain/cert/Route53 record. Needs to accept `Domain`,
+      `AcmCertArn`, `ApiGatewayDomain` parameters so two stacks
+      (`rom-hub-frontend-staging`, `rom-hub-frontend-prod`) can
+      deploy from the same template.
+
+      **SES.** Stays as one shared identity on `schuit.io`. Both
+      stages send `From: noreply@schuit.io`. (Optional later: SES
+      configuration sets to tag staging sends.)
+
+      **GitHub Actions.** Use AWS OIDC (no long-lived secrets in
+      Actions secrets). One IAM Identity Provider for GitHub, two
+      roles: `gha-deploy-staging` trusted from `refs/heads/main`,
+      `gha-deploy-prod` trusted from `refs/tags/v*` (tag-driven prod
+      deploys with manual approval). Two workflows under
+      `.github/workflows/`: `deploy-staging.yml` (push to main →
+      auto-deploy) and `deploy-prod.yml` (tag push or manual
+      dispatch). Each runs `serverless deploy --stage X`,
+      `wire-triggers:X`, `aws s3 sync` for the SPA, and a
+      CloudFront invalidation.
+
+      **Per-stage gotchas worth flagging when picking this up:**
+        - Each User Pool needs its own Google OAuth redirect URIs
+          registered in Google Cloud Console (the staging Cognito
+          hosted UI's `/oauth2/idpresponse` plus the staging app's
+          `/auth/callback`).
+        - `wire-triggers` is a per-stage post-deploy step. Add
+          `wire-triggers:staging` to backend `package.json`.
+        - First sign-in to staging in a browser is required to fire
+          `postAuth` and bootstrap admin — CI can't do this for you.
+        - Frontend `ApiGatewayDomain` must point at the matching
+          stage's API Gateway. Easy to mis-wire silently. Worth a
+          smoke test in CI that calls `/api/mounts` after deploy.
+        - The S3 `schuit-sharing` bucket is shared across stages. OK
+          today (read-only). If write paths are added later, make
+          this per-stage.
+
+      **Suggested order of operations:**
+        1. Issue ACM cert(s) in us-east-1 with DNS validation.
+        2. Parameterize `frontend-infra.yml`. Re-deploy prod stack
+           with parameters set to current values (no-op diff).
+        3. Add staging entries to `serverless.yml` custom maps.
+        4. Manual `serverless deploy --stage staging` from laptop
+           once to confirm clean stand-up.
+        5. Deploy `frontend-infra.yml` as `rom-hub-frontend-staging`.
+        6. Add staging redirect URIs to Google OAuth client.
+        7. Wire OIDC + GitHub Actions, staging workflow first.
+        8. Once staging CD is stable, add prod workflow with
+           manual approval.
+
 ## Done in last session (for context)
 
 - `4848be9` Send invite emails via SES from noreply@schuit.io
