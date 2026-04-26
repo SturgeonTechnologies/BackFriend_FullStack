@@ -3,12 +3,15 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** SES invite email send is verified end-to-end as of
-> 2026-04-26 (admin gate passes, invite written to DDB, email
-> delivered). SES is still in *sandbox* mode — only verified
-> recipients can receive mail until production access is requested
-> via the SES console. See [`TODO.md`](./TODO.md) for that and the
-> next planned item (real staging environment + GitHub Actions CD).
+> **Status:** Mid-migration — the live AWS resources are being
+> renamed from `rom-hub-dev` to `schuit-sharing-prod`. Code rename
+> is committed; AWS cutover is in progress (SSM creds copied, SES
+> stack redeployed, DKIM revalidating). See [`TODO.md`](./TODO.md)
+> for the resume runbook (steps 4–11).
+>
+> SES is still in *sandbox* mode — only verified recipients can
+> receive mail until production access is requested via the SES
+> console.
 
 - Auth: **Cognito + Google federation** (sign in with Google)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
