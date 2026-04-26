@@ -17,13 +17,26 @@ export function getCaller(event: APIGatewayProxyEventV2WithJWTAuthorizer): Calle
   const claims = event.requestContext.authorizer?.jwt?.claims ?? {};
   const sub = String(claims.sub ?? "");
 
-  // "cognito:groups" can arrive as string[] or as a stringified list.
+  // "cognito:groups" can arrive in three shapes depending on the runtime
+  // path:
+  //   1. Actual string[] — e.g. when the Lambda is invoked outside HTTP API,
+  //      or when claims are deserialized from JSON.
+  //   2. Comma-separated string "[admins, viewers]" — some serializers.
+  //   3. Space-separated string "[admins viewers]" — this is what API
+  //      Gateway HTTP API v2's JWT authorizer actually emits when it
+  //      forwards array claims to the Lambda. It uses Java's default
+  //      Object[].toString() formatting (brackets + space-separated, no
+  //      commas).
+  // We split on both commas AND whitespace to handle all three.
   const raw = claims["cognito:groups"];
   let groups: string[] = [];
   if (Array.isArray(raw)) groups = raw.map(String);
   else if (typeof raw === "string" && raw.length > 0) {
-    // Sometimes serialized as "[admins, viewers]" — be tolerant.
-    groups = raw.replace(/[[\]]/g, "").split(",").map((s) => s.trim()).filter(Boolean);
+    groups = raw
+      .replace(/[[\]]/g, "")
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   return {
