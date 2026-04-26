@@ -13,8 +13,12 @@ provider:
     STAGE: ${self:provider.stage}
     INVITES_TABLE: !Ref InvitesTable
     MOUNTS_TABLE: !Ref MountsTable
-    USER_POOL_ID: !Ref UserPool
-    USER_POOL_CLIENT_ID: !Ref UserPoolClient
+    # NOTE: USER_POOL_ID is intentionally NOT injected here. Doing so makes
+    # every Lambda DependOn UserPool, which creates a circular dependency
+    # via UserPool.LambdaConfig (which references the trigger Lambdas).
+    # The Cognito triggers receive the pool id on `event.userPoolId`; admin
+    # APIs that need it can read it from the JWT claims (`event.requestContext
+    # .authorizer.jwt.claims.iss`) or have it passed in.
     ADMIN_GROUP: admins
     BOOTSTRAP_ADMIN_EMAILS: ${self:custom.bootstrapAdmins}
     SHARES_BUCKET: ${self:custom.sharesBucket}
@@ -63,7 +67,10 @@ provider:
             - s3:GetObject
           Resource:
             - !Sub "arn:aws:s3:::${self:custom.sharesBucket}/*"
-        # Cognito admin APIs for group membership + post-auth provisioning
+        # Cognito admin APIs for group membership + post-auth provisioning.
+        # Resource is a wildcard userpool ARN — using `!GetAtt UserPool.Arn`
+        # would make IamRoleLambdaExecution depend on UserPool, which then
+        # cycles via UserPool.LambdaConfig → trigger Lambdas → role.
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
@@ -71,7 +78,7 @@ provider:
             - cognito-idp:AdminListGroupsForUser
             - cognito-idp:AdminGetUser
           Resource:
-            - !GetAtt UserPool.Arn
+            - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
 
 custom:
   # Comma-separated list of emails that are auto-promoted to admins on first sign-in.

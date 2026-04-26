@@ -5,20 +5,33 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 
 export const cognito = new CognitoIdentityProviderClient({});
-export const USER_POOL_ID = process.env.USER_POOL_ID!;
 
-export async function getUserGroups(username: string): Promise<string[]> {
+// NOTE: userPoolId is passed in as an argument rather than read from
+// process.env.USER_POOL_ID. Injecting USER_POOL_ID through serverless'
+// `provider.environment` would make every Lambda DependOn UserPool, which
+// creates a circular dependency through UserPool.LambdaConfig → trigger
+// Lambdas → role. Cognito triggers get the pool id from `event.userPoolId`;
+// other callers can derive it from the JWT issuer claim.
+
+export async function getUserGroups(
+  userPoolId: string,
+  username: string,
+): Promise<string[]> {
   const res = await cognito.send(
-    new AdminListGroupsForUserCommand({ UserPoolId: USER_POOL_ID, Username: username }),
+    new AdminListGroupsForUserCommand({ UserPoolId: userPoolId, Username: username }),
   );
   return (res.Groups ?? []).map((g) => g.GroupName!).filter(Boolean);
 }
 
-export async function addUserToGroup(username: string, groupName: string): Promise<void> {
+export async function addUserToGroup(
+  userPoolId: string,
+  username: string,
+  groupName: string,
+): Promise<void> {
   try {
     await cognito.send(
       new AdminAddUserToGroupCommand({
-        UserPoolId: USER_POOL_ID,
+        UserPoolId: userPoolId,
         Username: username,
         GroupName: groupName,
       }),

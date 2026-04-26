@@ -54,10 +54,13 @@ export const handler: PostAuthenticationTriggerHandler = async (event) => {
     }
 
     if (groupsToAssign.size > 0) {
-      const existing = new Set(await getUserGroups(username));
+      // event.userPoolId is supplied by Cognito on every trigger invocation,
+      // which lets us avoid an env var that would create a circular dep.
+      const userPoolId = event.userPoolId;
+      const existing = new Set(await getUserGroups(userPoolId, username));
       for (const g of groupsToAssign) {
         if (!existing.has(g)) {
-          await addUserToGroup(username, g);
+          await addUserToGroup(userPoolId, username, g);
         }
       }
     }
