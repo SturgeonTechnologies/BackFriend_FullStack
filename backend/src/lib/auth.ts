@@ -17,26 +17,46 @@ export function getCaller(event: APIGatewayProxyEventV2WithJWTAuthorizer): Calle
   const claims = event.requestContext.authorizer?.jwt?.claims ?? {};
   const sub = String(claims.sub ?? "");
 
-  // "cognito:groups" can arrive in three shapes depending on the runtime
-  // path:
-  //   1. Actual string[] — e.g. when the Lambda is invoked outside HTTP API,
-  //      or when claims are deserialized from JSON.
-  //   2. Comma-separated string "[admins, viewers]" — some serializers.
-  //   3. Space-separated string "[admins viewers]" — this is what API
-  //      Gateway HTTP API v2's JWT authorizer actually emits when it
-  //      forwards array claims to the Lambda. It uses Java's default
-  //      Object[].toString() formatting (brackets + space-separated, no
-  //      commas).
-  // We split on both commas AND whitespace to handle all three.
+  // "cognito:groups" can arrive in several shapes depending on the runtime
+  // path. We log the raw shape (DIAG_AUTH_GROUPS) once per request so we
+  // can confirm what API Gateway is actually sending — remove the log
+  // after the auth flow is confirmed working.
   const raw = claims["cognito:groups"];
+  console.log(
+    "DIAG_AUTH_GROUPS",
+    JSON.stringify({
+      raw,
+      typeof: typeof raw,
+      isArray: Array.isArray(raw),
+    }),
+  );
+
   let groups: string[] = [];
-  if (Array.isArray(raw)) groups = raw.map(String);
-  else if (typeof raw === "string" && raw.length > 0) {
-    groups = raw
-      .replace(/[[\]]/g, "")
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  if (Array.isArray(raw)) {
+    groups = raw.map(String);
+  } else if (typeof raw === "string" && raw.length > 0) {
+    // Strategy 1: try JSON.parse — handles JSON-encoded array '["a","b"]'.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // not JSON — fall through to the regex fallback
+    }
+    if (Array.isArray(parsed)) {
+      groups = (parsed as unknown[]).map(String);
+    } else {
+      // Strategy 2: regex fallback. Strip brackets/quotes/braces, then
+      // split on either commas or whitespace. This handles:
+      //   "[admins, viewers]"     (comma-separated)
+      //   "[admins viewers]"      (Java toString — what HTTP API v2 emits)
+      //   "admins,viewers"        (no brackets)
+      //   "admins viewers"        (no brackets, space-separated)
+      groups = raw
+        .replace(/[[\]"{}]/g, "")
+        .split(/[,\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
   }
 
   return {
