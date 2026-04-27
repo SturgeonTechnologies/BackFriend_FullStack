@@ -18,12 +18,27 @@ delete the line, when they're done.
         - [x] Step 3: `riley.schuit@gmail.com` re-verified as SES
               sandbox recipient (the prior verification was tied to
               the old SES identity).
-        - [ ] Step 4: Wait for DKIM `Success`. **Resume here.**
-        - [ ] Step 5: Deploy new backend (`schuit-sharing-prod`).
+        - [x] Step 4: DKIM verified.
+        - [x] Step 5: New backend stack `schuit-sharing-prod`
+              deployed (commit `4337069` fixed the SSM region/path
+              resolution that was blocking it). API Gateway:
+              `g35h6wblu7.execute-api.us-east-1.amazonaws.com`.
+              Endpoints + 10 Lambdas live. `wire-triggers:prod`
+              status — TBD; confirm it ran.
         - [ ] Step 6: Add new Cognito hosted-UI redirect URI to
-              Google OAuth client.
+              Google OAuth client. **Resume here.** Get the URL
+              from `aws cloudformation describe-stacks
+              --stack-name schuit-sharing-prod
+              --query 'Stacks[0].Outputs[?OutputKey==\`CognitoDomain\`]'`.
+              Add `<CognitoDomain>/oauth2/idpresponse` to the OAuth
+              client's Authorized redirect URIs.
         - [ ] Step 7: Update CloudFront `ApiGatewayDomain` parameter
-              on the existing `rom-hub-frontend` stack.
+              on the existing `rom-hub-frontend` stack:
+              `cd infrastructure && STACK_NAME=rom-hub-frontend
+              STAGE=prod ./deploy.sh`. Also rebuild the SPA with
+              the new VITE_USER_POOL_CLIENT_ID and VITE_COGNITO_DOMAIN
+              from the new stack outputs, then `aws s3 sync` the
+              dist + invalidate CloudFront.
         - [ ] Step 8: Sign in once to bootstrap admin on the new
               User Pool.
         - [ ] Step 9: Smoke test (mount + invite + email delivery).
