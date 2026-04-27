@@ -135,12 +135,16 @@ custom:
   mailRegion: us-east-1
 
   # Google OAuth credentials — stored in SSM Parameter Store, NOT in this file.
-  # Path is parameterized by service+stage so a future staging deploy
-  # uses /schuit-sharing/staging/... without colliding with prod.
-  #   aws ssm put-parameter --name /schuit-sharing/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"
-  #   aws ssm put-parameter --name /schuit-sharing/${stage}/google/client_secret --type SecureString --value "GOCSPX-..."
-  googleClientId:    ${ssm:/${self:service}/${self:provider.stage}/google/client_id}
-  googleClientSecret: ${ssm:/${self:service}/${self:provider.stage}/google/client_secret}
+  # The service-name segment is hardcoded (`schuit-sharing`) because
+  # Serverless v3 does NOT reliably resolve `${self:service}` inside an
+  # `${ssm:...}` lookup during variable resolution. `${self:provider.stage}`
+  # nesting works fine — that's what differentiates per-stage credentials.
+  # Region is pinned to us-east-1 for the same caller-environment reason
+  # (`${ssm:...}` otherwise uses the SDK's default region).
+  #   aws ssm put-parameter --region us-east-1 --name /schuit-sharing/${stage}/google/client_id     --type String       --value "xxxxxxxx.apps.googleusercontent.com"
+  #   aws ssm put-parameter --region us-east-1 --name /schuit-sharing/${stage}/google/client_secret --type SecureString --value "GOCSPX-..."
+  googleClientId:    ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/google/client_id}
+  googleClientSecret: ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/google/client_secret}
 
   esbuild:
     bundle: true
