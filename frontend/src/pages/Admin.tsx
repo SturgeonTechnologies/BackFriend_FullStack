@@ -297,6 +297,10 @@ function MountsCard() {
   const [newDirName, setNewDirName] = useState("");
   const [creatingDir, setCreatingDir] = useState(false);
 
+  // Known emails (invites + active users) for the Allowed-emails autocomplete.
+  const [knownEmails, setKnownEmails] = useState<string[]>([]);
+  const [emailFocused, setEmailFocused] = useState(false);
+
   const parseEmails = (raw: string): string[] =>
     raw
       .split(/[\s,;]+/)
@@ -347,7 +351,28 @@ function MountsCard() {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  useEffect(() => { refresh(); loadExplore(""); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    refresh();
+    loadExplore("");
+    if (idToken) listAccess(idToken).then((r) => setKnownEmails(r.access.map((a) => a.email))).catch(() => {});
+    /* eslint-disable-next-line */
+  }, []);
+
+  // Autocomplete for the comma-separated Allowed-emails field: suggest known
+  // emails matching the token after the last comma, excluding ones already added.
+  const emailToken = () => allowedEmailsRaw.slice(allowedEmailsRaw.lastIndexOf(",") + 1).trim().toLowerCase();
+  const emailSuggestions = (): string[] => {
+    const entered = new Set(parseEmails(allowedEmailsRaw));
+    const tok = emailToken();
+    return knownEmails
+      .filter((e) => !entered.has(e) && (tok === "" || e.toLowerCase().includes(tok)))
+      .slice(0, 8);
+  };
+  const pickEmail = (email: string) => {
+    const i = allowedEmailsRaw.lastIndexOf(",");
+    const prefix = i >= 0 ? allowedEmailsRaw.slice(0, i + 1) + " " : "";
+    setAllowedEmailsRaw(prefix + email + ", ");
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -530,11 +555,29 @@ function MountsCard() {
                 — leave blank to restrict to admins only. Admins always see every mount.
               </span>
             </label>
-            <input
-              value={allowedEmailsRaw}
-              onChange={(e) => setAllowedEmailsRaw(e.target.value)}
-              placeholder="alice@example.com, bob@example.com"
-            />
+            <div style={{ position: "relative" }}>
+              <input
+                value={allowedEmailsRaw}
+                onChange={(e) => setAllowedEmailsRaw(e.target.value)}
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
+                placeholder="start typing — pick from invited / active users"
+                autoComplete="off"
+              />
+              {emailFocused && emailSuggestions().length > 0 && (
+                <div className="autocomplete-panel">
+                  {emailSuggestions().map((e) => (
+                    <div
+                      key={e}
+                      className="autocomplete-item"
+                      onMouseDown={(ev) => { ev.preventDefault(); pickEmail(e); }}
+                    >
+                      {e}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <button disabled={busy} style={{ marginTop: "0.75rem" }}>
             {busy ? "Adding…" : "Add mount"}
