@@ -40,15 +40,16 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     const token = event.queryStringParameters?.token;
     const res = await listDir(bucket, prefix, token);
 
-    // Public-share state for the files at this level, keyed by full S3 key.
-    // Explorer shares live under the reserved BUCKET_PUBLIC_PARTITION.
+    // Public-share state, keyed by full S3 key. Explorer shares all live under
+    // the reserved BUCKET_PUBLIC_PARTITION, so we query the partition and match
+    // by key in code — a begins_with on the sort key would reject the empty
+    // prefix at the bucket root ("key attribute cannot contain an empty string").
     const publicTokens = new Map<string, string>();
     const shares = await ddb.send(
       new QueryCommand({
         TableName: PUBLIC_SHARES_TABLE,
-        KeyConditionExpression: "mountPath = :m AND begins_with(#p, :pre)",
-        ExpressionAttributeNames: { "#p": "path" },
-        ExpressionAttributeValues: { ":m": BUCKET_PUBLIC_PARTITION, ":pre": prefix },
+        KeyConditionExpression: "mountPath = :m",
+        ExpressionAttributeValues: { ":m": BUCKET_PUBLIC_PARTITION },
       }),
     );
     for (const s of shares.Items ?? []) {
