@@ -171,6 +171,12 @@ export function createFolder(idToken: string, prefix: string, name: string) {
     body: JSON.stringify({ prefix, name }),
   });
 }
+/** Permanently delete a directory (all objects under the prefix). Admin-only. */
+export function deleteDirectory(idToken: string, prefix: string) {
+  const qs = new URLSearchParams({ prefix });
+  return request<{ deleted: number; mountsRemoved: string[] }>(
+    `/admin/explore/directory?${qs}`, { method: "DELETE", idToken });
+}
 /** Explorer file actions, addressed by full S3 key (admin-only). */
 export function exploreDownloadUrl(idToken: string, key: string) {
   const qs = new URLSearchParams({ key });

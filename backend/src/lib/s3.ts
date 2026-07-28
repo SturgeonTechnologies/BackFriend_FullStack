@@ -1,9 +1,40 @@
 import {
-  S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand,
+  S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand,
+  DeleteObjectCommand, DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const s3 = new S3Client({});
+
+/** All object keys under a prefix (paginated, no delimiter — recurses). */
+export async function listAllKeys(bucket: string, prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of res.Contents ?? []) if (o.Key) keys.push(o.Key);
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return keys;
+}
+
+/** Delete objects in batches of 1000 (DeleteObjects limit). Returns count deleted. */
+export async function deleteObjects(bucket: string, keys: string[]): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    const res = await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      }),
+    );
+    deleted += batch.length - (res.Errors?.length ?? 0);
+  }
+  return deleted;
+}
 
 /**
  * Presigned PUT URL for a direct browser → S3 upload. ContentType is

@@ -226,6 +226,10 @@ functions:
     handler: src/handlers/admin/createFolder.handler
     events:
       - httpApi: { method: POST, path: /admin/explore/folder, authorizer: { name: cognito } }
+  deleteDirectory:
+    handler: src/handlers/admin/deleteDirectory.handler
+    events:
+      - httpApi: { method: DELETE, path: /admin/explore/directory, authorizer: { name: cognito } }
   # Explorer file actions (raw S3 key, admin-only): download, delete, public.
   exploreDownloadUrl:
     handler: src/handlers/admin/exploreDownloadUrl.handler

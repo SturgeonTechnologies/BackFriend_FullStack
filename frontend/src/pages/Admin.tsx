@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createInvite, revokeInvite, listAccess, AccessEntry,
   createMount, deleteMount, updateMount, listMounts, Mount,
-  exploreBucket, createFolder, ExploreResult, ExploreFile,
+  exploreBucket, createFolder, deleteDirectory, ExploreResult, ExploreFile, ExploreEntry,
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -376,6 +376,12 @@ function MountsCard() {
   const [newDirName, setNewDirName] = useState("");
   const [creatingDir, setCreatingDir] = useState(false);
 
+  // "Delete directory" popup state (type name + "confirm" to enable).
+  const [deleteDir, setDeleteDir] = useState<ExploreEntry | null>(null);
+  const [confirmName, setConfirmName] = useState("");
+  const [confirmWord, setConfirmWord] = useState("");
+  const [deletingDir, setDeletingDir] = useState(false);
+
   // Known emails (invites + active users) for the Allowed-emails autocomplete.
   const [knownEmails, setKnownEmails] = useState<string[]>([]);
 
@@ -414,6 +420,27 @@ function MountsCard() {
       await loadExplore(expPrefix); // refresh so the new folder shows up
     } catch (e: any) { setExpErr(e.message); }
     finally { setCreatingDir(false); }
+  };
+
+  const openDeleteDir = (folder: ExploreEntry) => {
+    setDeleteDir(folder);
+    setConfirmName("");
+    setConfirmWord("");
+    setExpErr(null);
+  };
+  const handleDeleteDir = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!idToken || !deleteDir) return;
+    // Guard: require the exact directory name + the word "confirm".
+    if (confirmName !== deleteDir.name || confirmWord.trim().toLowerCase() !== "confirm") return;
+    setDeletingDir(true); setExpErr(null);
+    try {
+      await deleteDirectory(idToken, deleteDir.path);
+      setDeleteDir(null);
+      await loadExplore(expPrefix);
+      await refresh(); // a mount may have been removed
+    } catch (e: any) { setExpErr(e.message); }
+    finally { setDeletingDir(false); }
   };
 
   // Fill the add/modify-mount form from a discovered directory, then scroll to
@@ -555,6 +582,58 @@ function MountsCard() {
             </form>
           </div>
         )}
+
+        {deleteDir && (
+          <div
+            onMouseDown={() => setDeleteDir(null)}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
+            }}
+          >
+            <form
+              onSubmit={handleDeleteDir}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="card"
+              style={{ width: 460, maxWidth: "92vw", margin: 0 }}
+            >
+              <h3 style={{ marginTop: 0 }}>Delete directory</h3>
+              <p style={{ marginTop: 0, fontSize: 14 }}>
+                This <strong>permanently deletes</strong> <code>/{deleteDir.path}</code> and
+                <strong> every file inside it</strong> from S3. This cannot be undone. Any mount
+                on this directory is also removed.
+              </p>
+              <label>
+                Type the directory name <code>{deleteDir.name}</code> to confirm
+              </label>
+              <input
+                autoFocus
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+                placeholder={deleteDir.name}
+                autoComplete="off"
+              />
+              <label style={{ marginTop: "0.75rem" }}>Then type <code>confirm</code></label>
+              <input
+                value={confirmWord}
+                onChange={(e) => setConfirmWord(e.target.value)}
+                placeholder="confirm"
+                autoComplete="off"
+              />
+              {expErr && <p className="err">{expErr}</p>}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
+                <button type="button" className="secondary" onClick={() => setDeleteDir(null)}>Cancel</button>
+                <button
+                  type="submit"
+                  className="danger"
+                  disabled={deletingDir || confirmName !== deleteDir.name || confirmWord.trim().toLowerCase() !== "confirm"}
+                >
+                  {deletingDir ? "Deleting…" : "Delete directory"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
         <table>
           <thead><tr>
             <th>Name</th><th>Type</th><th>Size</th>
@@ -578,8 +657,9 @@ function MountsCard() {
                 </td>
                 <td className="muted">folder</td>
                 <td className="muted">—</td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   <button type="button" onClick={() => useDirectory(f.path)}>Use this directory</button>
+                  <button type="button" className="danger" style={{ marginLeft: 8 }} onClick={() => openDeleteDir(f)}>Delete</button>
                 </td>
               </tr>
             ))}
