@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   listInvites, createInvite, revokeInvite, Invite,
   createMount, deleteMount, listMounts, Mount,
-  exploreBucket, ExploreResult,
+  exploreBucket, createFolder, ExploreResult,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -235,6 +235,11 @@ function MountsCard() {
   const [expLoading, setExpLoading] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
+  // "Create directory" popup state.
+  const [showNewDir, setShowNewDir] = useState(false);
+  const [newDirName, setNewDirName] = useState("");
+  const [creatingDir, setCreatingDir] = useState(false);
+
   const parseEmails = (raw: string): string[] =>
     raw
       .split(/[\s,;]+/)
@@ -256,6 +261,21 @@ function MountsCard() {
       setExpPrefix(r.prefix);
     } catch (e: any) { setExpErr(e.message); }
     finally { setExpLoading(false); }
+  };
+
+  const handleCreateDir = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!idToken) return;
+    const name = newDirName.trim();
+    if (!name) return;
+    setCreatingDir(true); setExpErr(null);
+    try {
+      await createFolder(idToken, expPrefix, name);
+      setShowNewDir(false);
+      setNewDirName("");
+      await loadExplore(expPrefix); // refresh so the new folder shows up
+    } catch (e: any) { setExpErr(e.message); }
+    finally { setCreatingDir(false); }
   };
 
   // Fill the add-mount form from a discovered directory, then scroll to it so
@@ -294,7 +314,7 @@ function MountsCard() {
 
   const handleDelete = async (mp: string) => {
     if (!idToken) return;
-    if (!confirm(`Delete mount "${mp}"? (Files in S3 are not touched.)`)) return;
+    if (!confirm(`Remove mount "${mp}"? This only removes the share — the files in S3 are not deleted.`)) return;
     try { await deleteMount(idToken, mp); await refresh(); }
     catch (e: any) { setErr(e.message); }
   };
@@ -322,8 +342,53 @@ function MountsCard() {
           </button>
           <code>/{expPrefix}</code>
           {expLoading && <span className="muted">Loading…</span>}
+          <button
+            type="button"
+            onClick={() => { setNewDirName(""); setExpErr(null); setShowNewDir(true); }}
+            style={{ marginLeft: "auto", background: "var(--success)", color: "#0b1f13" }}
+          >
+            Create Directory
+          </button>
         </div>
         {expErr && <p className="err">{expErr}</p>}
+
+        {showNewDir && (
+          <div
+            onMouseDown={() => setShowNewDir(false)}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
+            }}
+          >
+            <form
+              onSubmit={handleCreateDir}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="card"
+              style={{ width: 360, maxWidth: "90vw", margin: 0 }}
+            >
+              <h3 style={{ marginTop: 0 }}>Create directory</h3>
+              <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                New folder in <code>/{expPrefix}</code>
+              </p>
+              <input
+                autoFocus
+                value={newDirName}
+                onChange={(e) => setNewDirName(e.target.value)}
+                placeholder="folder name"
+              />
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
+                <button type="button" className="secondary" onClick={() => setShowNewDir(false)}>Cancel</button>
+                <button
+                  type="submit"
+                  disabled={creatingDir || !newDirName.trim()}
+                  style={{ background: "var(--success)", color: "#0b1f13" }}
+                >
+                  {creatingDir ? "Creating…" : "Create"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
         <table>
           <thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead>
           <tbody>
@@ -434,7 +499,7 @@ function MountsCard() {
                     ? m.allowedEmails.join(", ")
                     : "everyone"}
                 </td>
-                <td><button className="danger" onClick={() => handleDelete(m.mountPath)}>Delete</button></td>
+                <td><button className="danger" onClick={() => handleDelete(m.mountPath)}>Remove mount</button></td>
               </tr>
             ))}
             {!mounts.length && <tr><td colSpan={5} className="muted">No mounts yet.</td></tr>}

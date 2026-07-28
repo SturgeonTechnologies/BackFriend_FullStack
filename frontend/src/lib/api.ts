@@ -130,6 +130,14 @@ export function exploreBucket(idToken: string, prefix = "", token?: string) {
   const suffix = qs.toString() ? `?${qs}` : "";
   return request<ExploreResult>(`/admin/explore${suffix}`, { idToken });
 }
+/** Create an empty directory at `prefix` in the shares bucket. */
+export function createFolder(idToken: string, prefix: string, name: string) {
+  return request<{ ok: boolean; prefix: string }>("/admin/explore/folder", {
+    method: "POST",
+    idToken,
+    body: JSON.stringify({ prefix, name }),
+  });
+}
 
 // ----- Browse (any authenticated user) -----
 export function listMounts(idToken: string) {

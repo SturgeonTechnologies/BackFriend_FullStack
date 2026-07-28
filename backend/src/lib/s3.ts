@@ -1,7 +1,16 @@
-import { S3Client, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const s3 = new S3Client({});
+
+/**
+ * Create a "directory" in S3 by writing a zero-byte marker object whose key
+ * ends in "/". S3 has no real folders; this makes an empty prefix show up in
+ * delimiter-based listings (and lets the explorer navigate into it).
+ */
+export async function putFolderMarker(bucket: string, key: string): Promise<void> {
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: "" }));
+}
 
 export async function presignGet(
   bucket: string,

@@ -78,6 +78,9 @@ provider:
         - Effect: Allow
           Action:
             - s3:GetObject
+            # PutObject is used only by the admin "Create Directory" action
+            # (writes a zero-byte folder marker). Scoped to the shares bucket.
+            - s3:PutObject
           Resource:
             - !Sub "arn:aws:s3:::${self:custom.sharesBucket}/*"
         # Cognito admin APIs for group membership + post-auth provisioning.
@@ -206,6 +209,10 @@ functions:
     handler: src/handlers/admin/exploreBucket.handler
     events:
       - httpApi: { method: GET, path: /admin/explore, authorizer: { name: cognito } }
+  createFolder:
+    handler: src/handlers/admin/createFolder.handler
+    events:
+      - httpApi: { method: POST, path: /admin/explore/folder, authorizer: { name: cognito } }
 
   # --- Admin: per-file public sharing ---
   setPublic:
