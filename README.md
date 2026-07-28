@@ -13,10 +13,18 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 > receive mail until production access is requested via the SES
 > console.
 
-- Auth: **Cognito + Google federation** (sign in with Google)
+- Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
+  the Cognito hosted UI; email/password users self-register through the invite gate
+  and verify their address with a one-time code)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
-- Admins invite other users by email; invitees just click "Sign in with Google"
-- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`)
+- Admins invite other users by email; invitees go to the site and either "Sign in
+  with Google" or "Sign in with email" → "Sign up"
+- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
+
+> **One email = one sign-in method.** Because the pool uses the email as the
+> username, a given address should use **either** Google **or** a password, not both.
+> Signing up a password account for an email that already signs in with Google (or
+> vice-versa) collides in Cognito. Automatic account-linking is not configured.
 - Everything behind a single CloudFront distribution on `sharing.schuit.io`
 
 ## Layout
@@ -350,7 +358,12 @@ In Admin → **Invite a user**:
   and the recipient isn't verified, the form shows a warning + the link
   so you can paste it yourself.
 
-They just go to https://sharing.schuit.io and click **Sign in with Google**. The `preSignUp` Lambda trigger lets them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and marks the invite redeemed.
+They go to https://sharing.schuit.io and either **Sign in with Google** or
+**Sign in with email → Sign up** (email/password users get a one-time verification
+code — sent by Cognito's default email sender, which is *not* subject to the SES
+sandbox, so it reaches any invitee). Either way, the `preSignUp` Lambda trigger lets
+them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and
+marks the invite redeemed.
 
 ## Local development
 

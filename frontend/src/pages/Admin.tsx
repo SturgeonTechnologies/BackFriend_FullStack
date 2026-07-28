@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   listInvites, createInvite, revokeInvite, Invite,
   createMount, deleteMount, listMounts, Mount,
+  exploreBucket, ExploreResult,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -182,6 +183,39 @@ function InvitesCard() {
   );
 }
 
+// Turn an S3 folder leaf into a valid mount path: lowercase, non-[a-z0-9_-]
+// runs → "-", must start with an alphanumeric, max 32 chars (matches the
+// server's ^[a-z0-9][a-z0-9_-]{0,31}$).
+function sanitizeMountPath(leaf: string): string {
+  return leaf
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^[^a-z0-9]+/, "")
+    .slice(0, 32);
+}
+
+// Humanize a folder leaf into a default display name (separators → spaces,
+// first letter capitalized). Admins can edit before saving.
+function humanizeName(leaf: string): string {
+  const t = leaf.replace(/[_-]+/g, " ").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
+function formatSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+// Parent of an S3 prefix: "Video/Movies/" → "Video/", "Video/" → "".
+function parentPrefix(p: string): string {
+  const t = p.replace(/\/$/, "");
+  const i = t.lastIndexOf("/");
+  return i >= 0 ? t.slice(0, i + 1) : "";
+}
+
 function MountsCard() {
   const { idToken } = useAuth();
   const [mounts, setMounts] = useState<Mount[]>([]);
@@ -194,6 +228,13 @@ function MountsCard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Bucket explorer state.
+  const [exp, setExp] = useState<ExploreResult | null>(null);
+  const [expPrefix, setExpPrefix] = useState("");
+  const [expErr, setExpErr] = useState<string | null>(null);
+  const [expLoading, setExpLoading] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
   const parseEmails = (raw: string): string[] =>
     raw
       .split(/[\s,;]+/)
@@ -205,7 +246,31 @@ function MountsCard() {
     try { setMounts((await listMounts(idToken)).mounts); }
     catch (e: any) { setErr(e.message); }
   };
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, []);
+
+  const loadExplore = async (p: string) => {
+    if (!idToken) return;
+    setExpLoading(true); setExpErr(null);
+    try {
+      const r = await exploreBucket(idToken, p);
+      setExp(r);
+      setExpPrefix(r.prefix);
+    } catch (e: any) { setExpErr(e.message); }
+    finally { setExpLoading(false); }
+  };
+
+  // Fill the add-mount form from a discovered directory, then scroll to it so
+  // the admin can review/adjust access before submitting.
+  const useDirectory = (fullKey: string) => {
+    const leaf = fullKey.replace(/\/$/, "").split("/").pop() || "";
+    setPrefix(fullKey);
+    setMountPath(sanitizeMountPath(leaf));
+    setDisplayName(humanizeName(leaf));
+    setBucket("");
+    setErr(null);
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  useEffect(() => { refresh(); loadExplore(""); /* eslint-disable-next-line */ }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,14 +299,80 @@ function MountsCard() {
     catch (e: any) { setErr(e.message); }
   };
 
+  const linkBtn: React.CSSProperties = {
+    background: "none", border: "none", color: "var(--accent)",
+    cursor: "pointer", padding: 0, font: "inherit", textAlign: "left",
+  };
+
   return (
     <>
+      <div className="card">
+        <h3>Explore bucket</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Browse the real S3 layout and turn any directory into a mount.
+          <strong> Use this directory</strong> fills the form below — review it, then
+          click <strong>Add mount</strong>.
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          <button type="button" className="secondary" disabled={!expPrefix || expLoading} onClick={() => loadExplore("")}>
+            Root
+          </button>
+          <button type="button" className="secondary" disabled={!expPrefix || expLoading} onClick={() => loadExplore(parentPrefix(expPrefix))}>
+            Up
+          </button>
+          <code>/{expPrefix}</code>
+          {expLoading && <span className="muted">Loading…</span>}
+        </div>
+        {expErr && <p className="err">{expErr}</p>}
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead>
+          <tbody>
+            {exp?.folders.map((f) => (
+              <tr key={f.path}>
+                <td>
+                  <button type="button" style={linkBtn} onClick={() => loadExplore(f.path)}>
+                    📁 {f.name}/
+                  </button>
+                </td>
+                <td className="muted">folder</td>
+                <td className="muted">—</td>
+                <td>
+                  <button type="button" onClick={() => useDirectory(f.path)}>Use this directory</button>
+                </td>
+              </tr>
+            ))}
+            {exp?.files.map((f) => (
+              <tr key={f.path}>
+                <td className="muted">📄 {f.name}</td>
+                <td className="muted">file</td>
+                <td className="muted">{formatSize(f.size)}</td>
+                <td></td>
+              </tr>
+            ))}
+            {exp && !exp.folders.length && !exp.files.length && (
+              <tr><td colSpan={4} className="muted">This directory is empty.</td></tr>
+            )}
+            {!exp && !expErr && (
+              <tr><td colSpan={4} className="muted">Loading…</td></tr>
+            )}
+          </tbody>
+        </table>
+        {exp?.truncated && (
+          <p className="muted" style={{ marginTop: 4 }}>Listing truncated at 1000 items.</p>
+        )}
+        {expPrefix && (
+          <button type="button" style={{ marginTop: 8 }} onClick={() => useDirectory(expPrefix)}>
+            Use current directory (<code>/{expPrefix}</code>)
+          </button>
+        )}
+      </div>
+
       <div className="card">
         <h3>Add a shared directory (mount)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           Maps a URL path like <code>/roms</code> to an S3 prefix. Bucket defaults to the stack's configured shares bucket.
         </p>
-        <form onSubmit={handleCreate}>
+        <form ref={formRef} onSubmit={handleCreate}>
           <div className="row">
             <div style={{ maxWidth: 140 }}>
               <label>Path</label>

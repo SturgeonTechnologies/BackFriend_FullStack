@@ -192,6 +192,12 @@ functions:
     events:
       - httpApi: { method: DELETE, path: "/admin/mounts/{mountPath}", authorizer: { name: cognito } }
 
+  # --- Admin: raw-bucket explorer (discover directories to mount) ---
+  exploreBucket:
+    handler: src/handlers/admin/exploreBucket.handler
+    events:
+      - httpApi: { method: GET, path: /admin/explore, authorizer: { name: cognito } }
+
   # --- Authenticated: directory browser ---
   listMounts:
     handler: src/handlers/user/listMounts.handler
@@ -278,7 +284,12 @@ resources:
         UserPoolId: !Ref UserPool
         ClientName: ${self:service}-${self:provider.stage}-web
         GenerateSecret: false
+        # COGNITO enables the hosted UI's native email/password form (plus the
+        # self-service "Sign up" and "Forgot password" screens). Google stays for
+        # federated sign-in. Both flows funnel through the same OAuth `code` +
+        # PKCE exchange, so the app-side handling is identical.
         SupportedIdentityProviders:
+          - COGNITO
           - Google
         AllowedOAuthFlows: [code]
         AllowedOAuthFlowsUserPoolClient: true

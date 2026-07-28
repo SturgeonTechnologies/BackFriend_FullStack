@@ -130,6 +130,18 @@ delete the line, when they're done.
       # default STACK_NAME=schuit-sharing-frontend, STAGE=prod
       ```
 
+- [ ] **Email/password verification uses Cognito's default sender, not SES.**
+      Deliberate while SES is in sandbox (SES-backed Cognito email can only
+      reach SES-verified recipients, which would break signup for new
+      invitees). Once SES production access lands, optionally switch the pool
+      to `EmailConfiguration.EmailSendingAccount: DEVELOPER` with
+      `From: noreply@schuit.io` + the `schuit.io` identity SourceArn for
+      branded, higher-limit verification emails.
+
+- [ ] **No Google↔password account linking.** One email should use one method.
+      If a user needs both, wire `AdminLinkProviderForUser` in `preSignUp`
+      (external-provider path) to merge into the existing native user.
+
 - [ ] **SES is still in sandbox.** End-to-end send was verified on
       the prior identity (2026-04-26). After the rename migration
       finishes, re-verify with a fresh send. To remove sandbox

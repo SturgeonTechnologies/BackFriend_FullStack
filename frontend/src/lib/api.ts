@@ -107,6 +107,30 @@ export function deleteMount(idToken: string, mountPath: string) {
   });
 }
 
+// ----- Bucket explorer (admin) -----
+export interface ExploreEntry { name: string; path: string; }
+export interface ExploreFile extends ExploreEntry { size: number; lastModified?: string; }
+export interface ExploreResult {
+  bucket: string;
+  prefix: string;
+  folders: ExploreEntry[];
+  files: ExploreFile[];
+  truncated: boolean;
+  nextToken?: string;
+}
+/**
+ * Admin-only raw-bucket browser. `prefix` is a full S3 key prefix (empty = bucket
+ * root); a returned folder's `path` is the full key to hand straight to
+ * createMount as the mount's `prefix`.
+ */
+export function exploreBucket(idToken: string, prefix = "", token?: string) {
+  const qs = new URLSearchParams();
+  if (prefix) qs.set("prefix", prefix);
+  if (token) qs.set("token", token);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<ExploreResult>(`/admin/explore${suffix}`, { idToken });
+}
+
 // ----- Browse (any authenticated user) -----
 export function listMounts(idToken: string) {
   return request<{ mounts: Mount[] }>("/mounts", { idToken });
