@@ -342,13 +342,6 @@ function MountsCard() {
           </button>
           <code>/{expPrefix}</code>
           {expLoading && <span className="muted">Loading…</span>}
-          <button
-            type="button"
-            onClick={() => { setNewDirName(""); setExpErr(null); setShowNewDir(true); }}
-            style={{ marginLeft: "auto", background: "var(--success)", color: "#0b1f13" }}
-          >
-            Create Directory
-          </button>
         </div>
         {expErr && <p className="err">{expErr}</p>}
 
@@ -390,7 +383,18 @@ function MountsCard() {
           </div>
         )}
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Name</th><th>Type</th><th>Size</th>
+            <th>
+              <button
+                type="button"
+                onClick={() => { setNewDirName(""); setExpErr(null); setShowNewDir(true); }}
+                style={{ background: "var(--success)", color: "#0b1f13" }}
+              >
+                Create Directory
+              </button>
+            </th>
+          </tr></thead>
           <tbody>
             {exp?.folders.map((f) => (
               <tr key={f.path}>
