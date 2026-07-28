@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  listInvites, createInvite, revokeInvite, Invite,
+  createInvite, revokeInvite, listAccess, AccessEntry,
   createMount, deleteMount, listMounts, Mount,
   exploreBucket, createFolder, ExploreResult, ExploreFile,
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
@@ -27,7 +27,7 @@ interface InviteResultBanner {
 
 function InvitesCard() {
   const { idToken } = useAuth();
-  const [invites, setInvites] = useState<Invite[]>([]);
+  const [access, setAccess] = useState<AccessEntry[]>([]);
   const [email, setEmail] = useState("");
   const [makeAdmin, setMakeAdmin] = useState(false);
   const [ttlDays, setTtlDays] = useState(14);
@@ -42,7 +42,7 @@ function InvitesCard() {
 
   const refresh = async () => {
     if (!idToken) return;
-    try { setInvites((await listInvites(idToken)).invites); }
+    try { setAccess((await listAccess(idToken)).access); }
     catch (e: any) { setErr(e.message); }
   };
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, []);
@@ -159,25 +159,29 @@ function InvitesCard() {
       </div>
 
       <div className="card">
-        <h3>Invites</h3>
+        <h3>Invites/Access</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Everyone who can sign in (including admins), plus invites that haven't been used yet.
+        </p>
         <table>
           <thead><tr>
-            <th>Email</th><th>Groups</th><th>Created</th><th>Expires</th><th>Redeemed</th><th></th>
+            <th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th></th>
           </tr></thead>
           <tbody>
-            {invites.map((i) => (
-              <tr key={i.email}>
-                <td>{i.email}</td>
-                <td>{i.groups.join(", ") || "—"}</td>
-                <td>{new Date(i.createdAt).toLocaleString()}</td>
-                <td>{new Date(i.expiresAt).toLocaleString()}</td>
-                <td>{i.redeemedAt ? new Date(i.redeemedAt).toLocaleString() : "—"}</td>
+            {access.map((a) => (
+              <tr key={a.email}>
+                <td>{a.email}</td>
+                <td>{a.role === "admin" ? <strong>Admin</strong> : "Member"}</td>
+                <td className="muted">{a.status === "active" ? "Active" : "Invited (pending)"}</td>
+                <td className="muted">{a.expiresAt ? new Date(a.expiresAt).toLocaleDateString() : "—"}</td>
                 <td>
-                  {!i.redeemedAt && <button className="danger" onClick={() => handleRevoke(i.email)}>Revoke</button>}
+                  {a.status === "pending" && (
+                    <button className="danger" onClick={() => handleRevoke(a.email)}>Revoke</button>
+                  )}
                 </td>
               </tr>
             ))}
-            {!invites.length && <tr><td colSpan={6} className="muted">No invites yet.</td></tr>}
+            {!access.length && <tr><td colSpan={5} className="muted">No one has access yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -537,7 +541,7 @@ function MountsCard() {
             <label>
               Allowed emails (optional, comma-separated)
               <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
-                — leave blank to share with all signed-in users. Admins always see every mount.
+                — leave blank to restrict to admins only. Admins always see every mount.
               </span>
             </label>
             <input
@@ -568,7 +572,7 @@ function MountsCard() {
                 <td className="muted">
                   {m.allowedEmails && m.allowedEmails.length
                     ? m.allowedEmails.join(", ")
-                    : "everyone"}
+                    : "admins only"}
                 </td>
                 <td><button className="danger" onClick={() => handleDelete(m.mountPath)}>Remove mount</button></td>
               </tr>

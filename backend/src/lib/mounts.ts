@@ -45,14 +45,14 @@ export async function getMount(mountPath: string): Promise<MountRow | null> {
  *
  * Rules:
  *   - Admins always see everything.
- *   - If the mount has no `allowedEmails` (undefined or empty), it is public
- *     to every authenticated user.
+ *   - If the mount has no `allowedEmails` (undefined or empty), it is
+ *     restricted to admins only.
  *   - Otherwise, only callers whose email (lowercased) appears in the list
  *     are allowed.
  */
 export function canSeeMount(caller: CallerIdentity, mount: MountRow): boolean {
   if (caller.isAdmin) return true;
-  if (!mount.allowedEmails || mount.allowedEmails.length === 0) return true;
+  if (!mount.allowedEmails || mount.allowedEmails.length === 0) return false;
   if (!caller.email) return false;
   return mount.allowedEmails.includes(caller.email.toLowerCase());
 }

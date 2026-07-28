@@ -238,16 +238,18 @@ export default function Browse() {
               <td style={{ whiteSpace: "nowrap" }}>
                 {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
                 <button onClick={() => download(f.path)}>Download</button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => removeFile(f)}
-                  title="Delete file"
-                  aria-label={`Delete ${f.name}`}
-                  style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                >
-                  <TrashIcon />
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => removeFile(f)}
+                    title="Delete file"
+                    aria-label={`Delete ${f.name}`}
+                    style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                  >
+                    <TrashIcon />
+                  </button>
+                )}
               </td>
             </tr>
           ))}

@@ -70,6 +70,17 @@ export function revokeInvite(idToken: string, email: string) {
   });
 }
 
+// ----- Access list (admin): everyone who can sign in + pending invites -----
+export interface AccessEntry {
+  email: string;
+  role: "admin" | "member";
+  status: "active" | "pending";
+  expiresAt?: string;
+}
+export function listAccess(idToken: string) {
+  return request<{ access: AccessEntry[] }>("/admin/access", { idToken });
+}
+
 // ----- Mounts (admin) -----
 export interface Mount {
   mountPath: string;
