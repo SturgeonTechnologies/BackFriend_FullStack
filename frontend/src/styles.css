@@ -108,6 +108,29 @@ main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
 }
 .autocomplete-item:hover { background: var(--panel-2); }
 
+/* Allowed-emails chips. */
+.email-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 6px 3px 12px;
+  font-size: 0.85rem;
+}
+.email-chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+}
+.email-chip-remove:hover { background: rgba(255, 91, 91, 0.15); }
+
 button, .btn {
   background: var(--accent);
   color: white;

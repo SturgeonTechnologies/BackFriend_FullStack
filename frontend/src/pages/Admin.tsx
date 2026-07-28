@@ -274,45 +274,72 @@ function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted
   );
 }
 
-// Comma-separated Allowed-emails input with autocomplete from known emails
-// (active users + pending invites). Suggests the token after the last comma,
-// excluding already-added addresses.
-function AllowedEmailsInput({
-  value, onChange, knownEmails, placeholder,
+// Allowed-emails editor: an input with autocomplete (from active users +
+// pending invites) plus an "Add" button; added emails render as chips with a
+// trash icon to remove. Value is the list of emails.
+const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+function EmailChips({
+  emails, onChange, knownEmails,
 }: {
-  value: string;
-  onChange: (v: string) => void;
+  emails: string[];
+  onChange: (next: string[]) => void;
   knownEmails: string[];
-  placeholder?: string;
 }) {
+  const [draft, setDraft] = useState("");
   const [focused, setFocused] = useState(false);
-  const parse = (raw: string) => raw.split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const token = value.slice(value.lastIndexOf(",") + 1).trim().toLowerCase();
+
+  const add = (raw: string) => {
+    const e = raw.trim().toLowerCase();
+    if (!e || !isEmail(e) || emails.includes(e)) return;
+    onChange([...emails, e]);
+    setDraft("");
+  };
+  const remove = (e: string) => onChange(emails.filter((x) => x !== e));
   const suggestions = (): string[] => {
-    const entered = new Set(parse(value));
-    return knownEmails.filter((e) => !entered.has(e) && (token === "" || e.toLowerCase().includes(token))).slice(0, 8);
+    const d = draft.trim().toLowerCase();
+    return knownEmails.filter((e) => !emails.includes(e) && (d === "" || e.includes(d))).slice(0, 8);
   };
-  const pick = (email: string) => {
-    const i = value.lastIndexOf(",");
-    const prefix = i >= 0 ? value.slice(0, i + 1) + " " : "";
-    onChange(prefix + email + ", ");
-  };
+  const canAdd = isEmail(draft.trim().toLowerCase()) && !emails.includes(draft.trim().toLowerCase());
+
   return (
-    <div style={{ position: "relative" }}>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        placeholder={placeholder}
-        autoComplete="off"
-      />
-      {focused && suggestions().length > 0 && (
-        <div className="autocomplete-panel">
-          {suggestions().map((e) => (
-            <div key={e} className="autocomplete-item" onMouseDown={(ev) => { ev.preventDefault(); pick(e); }}>
+    <div>
+      <div style={{ position: "relative", display: "flex", gap: 8 }}>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } }}
+          placeholder="add an email — pick from invited / active users"
+          autoComplete="off"
+        />
+        <button type="button" onClick={() => add(draft)} disabled={!canAdd} style={{ whiteSpace: "nowrap" }}>Add</button>
+        {focused && suggestions().length > 0 && (
+          <div className="autocomplete-panel">
+            {suggestions().map((e) => (
+              <div key={e} className="autocomplete-item" onMouseDown={(ev) => { ev.preventDefault(); add(e); }}>
+                {e}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {emails.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {emails.map((e) => (
+            <span key={e} className="email-chip">
               {e}
-            </div>
+              <button
+                type="button"
+                className="email-chip-remove"
+                onClick={() => remove(e)}
+                title={`Remove ${e}`}
+                aria-label={`Remove ${e}`}
+              >
+                <TrashIcon />
+              </button>
+            </span>
           ))}
         </div>
       )}
@@ -328,7 +355,7 @@ function MountsCard() {
   const [prefix, setPrefix] = useState("Video_Game_ROMs/");
   const [bucket, setBucket] = useState("");
   const [description, setDescription] = useState("");
-  const [allowedEmailsRaw, setAllowedEmailsRaw] = useState("");
+  const [allowedEmailsList, setAllowedEmailsList] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -349,14 +376,8 @@ function MountsCard() {
 
   // "Manage access" editor for an existing mount.
   const [editMount, setEditMount] = useState<Mount | null>(null);
-  const [editEmailsRaw, setEditEmailsRaw] = useState("");
+  const [editEmailsList, setEditEmailsList] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
-
-  const parseEmails = (raw: string): string[] =>
-    raw
-      .split(/[\s,;]+/)
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => s.length > 0);
 
   const refresh = async () => {
     if (!idToken) return;
@@ -390,13 +411,17 @@ function MountsCard() {
     finally { setCreatingDir(false); }
   };
 
-  // Fill the add-mount form from a discovered directory, then scroll to it so
-  // the admin can review/adjust access before submitting.
+  // Fill the add/modify-mount form from a discovered directory, then scroll to
+  // it. If the directory is already mounted (same S3 prefix), prefill that
+  // mount's details so submitting *modifies* it (e.g. to add users).
   const useDirectory = (fullKey: string) => {
     const leaf = fullKey.replace(/\/$/, "").split("/").pop() || "";
+    const existing = mounts.find((m) => m.prefix === fullKey);
     setPrefix(fullKey);
-    setMountPath(sanitizeMountPath(leaf));
-    setDisplayName(humanizeName(leaf));
+    setMountPath(existing ? existing.mountPath : sanitizeMountPath(leaf));
+    setDisplayName(existing ? existing.displayName : humanizeName(leaf));
+    setDescription(existing?.description ?? "");
+    setAllowedEmailsList(existing?.allowedEmails ?? []);
     setBucket("");
     setErr(null);
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -411,7 +436,7 @@ function MountsCard() {
 
   const openEditAccess = (m: Mount) => {
     setEditMount(m);
-    setEditEmailsRaw((m.allowedEmails ?? []).join(", "));
+    setEditEmailsList(m.allowedEmails ?? []);
     setErr(null);
   };
   const handleSaveAccess = async (e: React.FormEvent) => {
@@ -419,28 +444,37 @@ function MountsCard() {
     if (!idToken || !editMount) return;
     setSavingEdit(true); setErr(null);
     try {
-      await updateMount(idToken, editMount.mountPath, { allowedEmails: parseEmails(editEmailsRaw) });
+      await updateMount(idToken, editMount.mountPath, { allowedEmails: editEmailsList });
       setEditMount(null);
       await refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setSavingEdit(false); }
   };
 
+  // Add a new mount, or modify an existing one (same path) — e.g. to add users.
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken) return;
     setBusy(true); setErr(null);
     try {
-      const emails = parseEmails(allowedEmailsRaw);
-      await createMount(idToken, {
-        mountPath: mountPath.trim(),
-        displayName: displayName.trim(),
-        prefix: prefix.trim(),
-        description: description.trim() || undefined,
-        bucket: bucket.trim() || undefined,
-        allowedEmails: emails.length ? emails : undefined,
-      });
-      setAllowedEmailsRaw("");
+      const np = mountPath.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+      const existing = mounts.find((m) => m.mountPath === np);
+      if (existing) {
+        await updateMount(idToken, existing.mountPath, {
+          allowedEmails: allowedEmailsList,
+          displayName: displayName.trim(),
+          description: description.trim(),
+        });
+      } else {
+        await createMount(idToken, {
+          mountPath: mountPath.trim(),
+          displayName: displayName.trim(),
+          prefix: prefix.trim(),
+          description: description.trim() || undefined,
+          bucket: bucket.trim() || undefined,
+          allowedEmails: allowedEmailsList.length ? allowedEmailsList : undefined,
+        });
+      }
       await refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setBusy(false); }
@@ -571,9 +605,10 @@ function MountsCard() {
       </div>
 
       <div className="card">
-        <h3>Add a shared directory (mount)</h3>
+        <h3>Add/modify a shared directory (mount)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           Maps a URL path like <code>/roms</code> to an S3 prefix. Bucket defaults to the stack's configured shares bucket.
+          Using a path that already exists updates that mount (e.g. to add users).
         </p>
         <form ref={formRef} onSubmit={handleCreate}>
           <div className="row">
@@ -602,20 +637,19 @@ function MountsCard() {
           </div>
           <div style={{ marginTop: "0.75rem" }}>
             <label>
-              Allowed emails (optional, comma-separated)
+              Allowed emails
               <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
-                — leave blank to restrict to admins only. Admins always see every mount.
+                — leave empty to restrict to admins only. Admins always see every mount.
               </span>
             </label>
-            <AllowedEmailsInput
-              value={allowedEmailsRaw}
-              onChange={setAllowedEmailsRaw}
-              knownEmails={knownEmails}
-              placeholder="start typing — pick from invited / active users"
-            />
+            <EmailChips emails={allowedEmailsList} onChange={setAllowedEmailsList} knownEmails={knownEmails} />
           </div>
           <button disabled={busy} style={{ marginTop: "0.75rem" }}>
-            {busy ? "Adding…" : "Add mount"}
+            {busy
+              ? "Saving…"
+              : mounts.some((m) => m.mountPath === mountPath.trim().replace(/^\/+|\/+$/g, "").toLowerCase())
+                ? "Save changes"
+                : "Add mount"}
           </button>
         </form>
         {err && <p className="err">{err}</p>}
@@ -665,17 +699,12 @@ function MountsCard() {
           >
             <h3 style={{ marginTop: 0 }}>Manage access — {editMount.displayName}</h3>
             <label>
-              Allowed emails (comma-separated)
+              Allowed emails
               <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
-                — leave blank to restrict to admins only.
+                — leave empty to restrict to admins only.
               </span>
             </label>
-            <AllowedEmailsInput
-              value={editEmailsRaw}
-              onChange={setEditEmailsRaw}
-              knownEmails={knownEmails}
-              placeholder="start typing — pick from invited / active users"
-            />
+            <EmailChips emails={editEmailsList} onChange={setEditEmailsList} knownEmails={knownEmails} />
             {err && <p className="err">{err}</p>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
               <button type="button" className="secondary" onClick={() => setEditMount(null)}>Cancel</button>

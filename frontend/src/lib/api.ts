@@ -88,10 +88,12 @@ export interface Mount {
   description: string;
   /**
    * Only populated when the caller is an admin. If undefined or empty, the
-   * mount is visible to every authenticated user; otherwise only listed
-   * lowercase emails (plus admins) can see it.
+   * mount is admins-only; otherwise only listed lowercase emails (plus admins)
+   * can see it.
    */
   allowedEmails?: string[];
+  /** S3 prefix — admin-only; used to match a mount to an explorer directory. */
+  prefix?: string;
 }
 export function createMount(
   idToken: string,
