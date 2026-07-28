@@ -164,8 +164,12 @@ delete the line, when they're done.
       without the trailing slash, either fix the client to include it
       or relax LogoutURLs in `serverless.yml` to register both forms.
 
-- [ ] **Stand up a real staging environment + GitHub Actions CD.**
-      Decision pending — Riley wants to think about it. Captured plan:
+- [~] **Stand up a real staging environment + GitHub Actions CD.**
+      **Prod CD is DONE** (2026-07-28): `.github/workflows/deploy.yml` deploys
+      on push to `main` via GitHub OIDC → `schuit-sharing-gha-deploy`
+      (`infrastructure/github-oidc.yml`; run the one-time CFN to create the
+      role). Staging (a second stage/domain) is still not built. Original
+      captured plan below:
 
       **Domain layout.** Keep `sharing.schuit.io` as prod. Add a
       sibling `sharing-staging.schuit.io` for staging. Sibling

@@ -401,6 +401,38 @@ Add `http://localhost:5173/auth/callback` to:
 - the Cognito User Pool Client's **Callback URLs** (already included by `serverless.yml`)
 - the Google OAuth client's authorized redirect URIs (optional — only if you want to test the full Google → Cognito → app flow against a dev Cognito domain)
 
+## Continuous deployment (GitHub Actions)
+
+Pushes to `main` deploy to prod via `.github/workflows/deploy.yml` — no
+long-lived AWS keys (GitHub OIDC → a scoped IAM role). The workflow deploys the
+backend (`serverless deploy` + `wire-triggers`), reads the stack outputs, builds
+the SPA against them, syncs to `s3://schuit-sharing/web/`, and invalidates
+CloudFront.
+
+**One-time setup** — create the deploy role (this is the only step that needs
+your hands, since it grants deploy access):
+
+```bash
+aws cloudformation deploy \
+  --region us-east-1 \
+  --stack-name schuit-sharing-gha \
+  --template-file infrastructure/github-oidc.yml \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+That creates `schuit-sharing-gha-deploy`, trusted only by
+`SturgeonTechnologies/schuit-sharing` on `main` (via the account's existing
+GitHub OIDC provider). The workflow already references this role ARN. After the
+role exists, push to `main` (or run the workflow manually from the Actions tab).
+
+> The role's policy is scoped by resource for S3/IAM/SSM/CloudFront/DynamoDB but
+> broad (service-level) for CloudFormation/Lambda/API Gateway/Cognito, which are
+> hard to resource-scope for a `serverless deploy`. Tighten later if desired.
+>
+> The bucket's Public Access Block + CORS are set out-of-band and are **not**
+> touched by CI. First-ever admin bootstrap (a real sign-in) also can't be done
+> by CI — already done here.
+
 ## Security notes
 
 - **Cognito is the trust boundary.** The API Gateway JWT authorizer validates every request. Lambdas extract `email`, `sub`, and `cognito:groups` from verified claims.
@@ -420,6 +452,4 @@ Add `http://localhost:5173/auth/callback` to:
 - Add CloudWatch alarms on Lambda errors/throttles and DynamoDB throttles.
 - Turn on MFA in Cognito (`MfaConfiguration: OPTIONAL`) for the email/password accounts.
 - Consider CloudFront signed URLs for very large files; S3 presigned GETs are fine up to a few hundred MB.
-- Stand up CI/CD (GitHub Actions) so deploys aren't manual — see `TODO.md` for the captured plan (OIDC roles, per-stage workflows).
-
-Done already: SES production access, and the S3 Public Access Block lockdown described above.
+Done already: SES production access, the S3 Public Access Block lockdown described above, and **GitHub Actions CD** (see the section above; run the one-time role setup to activate it).
