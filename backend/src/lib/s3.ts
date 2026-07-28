@@ -1,7 +1,30 @@
-import { S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const s3 = new S3Client({});
+
+/**
+ * Presigned PUT URL for a direct browser → S3 upload. ContentType is
+ * intentionally not part of the signed request, so the browser may send any
+ * Content-Type without breaking the signature.
+ */
+export async function presignPut(
+  bucket: string,
+  key: string,
+  expiresInSeconds = 3600,
+): Promise<string> {
+  return getSignedUrl(
+    s3,
+    new PutObjectCommand({ Bucket: bucket, Key: key }),
+    { expiresIn: expiresInSeconds },
+  );
+}
+
+export async function deleteObject(bucket: string, key: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
 
 /**
  * Create a "directory" in S3 by writing a zero-byte marker object whose key

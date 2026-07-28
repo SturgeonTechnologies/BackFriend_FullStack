@@ -78,9 +78,11 @@ provider:
         - Effect: Allow
           Action:
             - s3:GetObject
-            # PutObject is used only by the admin "Create Directory" action
-            # (writes a zero-byte folder marker). Scoped to the shares bucket.
+            # PutObject: "Create Directory" (folder marker) + presigned uploads.
+            # DeleteObject: the per-file delete action. Both are scoped to the
+            # shares bucket and gated in code (mount access + prefix guard).
             - s3:PutObject
+            - s3:DeleteObject
           Resource:
             - !Sub "arn:aws:s3:::${self:custom.sharesBucket}/*"
         # Cognito admin APIs for group membership + post-auth provisioning.
@@ -243,6 +245,14 @@ functions:
     handler: src/handlers/user/browseDownloadUrl.handler
     events:
       - httpApi: { method: GET, path: "/browse/{mountPath}/download-url", authorizer: { name: cognito } }
+  uploadUrl:
+    handler: src/handlers/user/uploadUrl.handler
+    events:
+      - httpApi: { method: POST, path: "/browse/{mountPath}/upload-url", authorizer: { name: cognito } }
+  deleteFile:
+    handler: src/handlers/user/deleteFile.handler
+    events:
+      - httpApi: { method: DELETE, path: "/browse/{mountPath}/file", authorizer: { name: cognito } }
 
 resources:
   Resources:

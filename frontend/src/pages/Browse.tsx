@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   browseList, getDownloadUrl, setFilePublic, unsetFilePublic,
+  getUploadUrl, deleteFile,
   BrowseFile, BrowseFolder,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -22,6 +23,14 @@ function ClipboardIcon() {
     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1z" />
       <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53Zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5" />
     </svg>
   );
 }
@@ -128,20 +137,26 @@ export default function Browse() {
   const [files, setFiles] = useState<BrowseFile[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!idToken) return;
     setLoading(true);
     setErr(null);
-    browseList(idToken, mountPath, subpath)
-      .then((r) => {
-        setDisplayName(r.mount.displayName);
-        setFolders(r.folders);
-        setFiles(r.files);
-      })
-      .catch((e) => setErr(e.message))
-      .finally(() => setLoading(false));
+    try {
+      const r = await browseList(idToken, mountPath, subpath);
+      setDisplayName(r.mount.displayName);
+      setFolders(r.folders);
+      setFiles(r.files);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, [idToken, mountPath, subpath]);
+
+  useEffect(() => { load(); }, [load]);
 
   const download = async (filePath: string) => {
     if (!idToken) return;
@@ -153,18 +168,71 @@ export default function Browse() {
     }
   };
 
+  const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files;
+    if (!picked || !picked.length || !idToken) return;
+    const list = Array.from(picked);
+    e.target.value = ""; // allow re-selecting the same file later
+    let done = 0;
+    setUploadMsg(`Uploading 0/${list.length}…`);
+    try {
+      for (const file of list) {
+        const rel = `${subpath}${file.name}`;
+        const { uploadUrl } = await getUploadUrl(idToken, mountPath, rel);
+        const res = await fetch(uploadUrl, { method: "PUT", body: file });
+        if (!res.ok) throw new Error(`Upload failed for ${file.name} (HTTP ${res.status})`);
+        done++;
+        setUploadMsg(`Uploading ${done}/${list.length}…`);
+      }
+      setUploadMsg(`Uploaded ${done} file${done === 1 ? "" : "s"}.`);
+      await load();
+      setTimeout(() => setUploadMsg(null), 4000);
+    } catch (err: any) {
+      setUploadMsg(null);
+      alert(err.message ?? "Upload failed");
+      await load();
+    }
+  };
+
+  const removeFile = async (file: BrowseFile) => {
+    if (!idToken) return;
+    if (!confirm(`Permanently delete "${file.name}"? This deletes the file from S3 and cannot be undone.`)) return;
+    try {
+      await deleteFile(idToken, mountPath, file.path);
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? "Delete failed");
+    }
+  };
+
   return (
     <div>
       <Breadcrumbs mountPath={mountPath} displayName={displayName} path={subpath} />
       {err && <p className="err">{err}</p>}
       {loading && <p className="muted">Loading…</p>}
+      {uploadMsg && <p className="muted">{uploadMsg}</p>}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={onFilesSelected}
+      />
       <table>
         <thead>
           <tr>
             <th>Name</th>
             <th style={{ width: 120 }}>Size</th>
             <th style={{ width: 180 }}>Modified</th>
-            <th style={{ width: isAdmin ? 260 : 120 }}></th>
+            <th style={{ width: isAdmin ? 320 : 200 }}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ background: "var(--success)", color: "#0b1f13" }}
+              >
+                Add file(s)
+              </button>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -188,6 +256,16 @@ export default function Browse() {
               <td style={{ whiteSpace: "nowrap" }}>
                 {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
                 <button onClick={() => download(f.path)}>Download</button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => removeFile(f)}
+                  title="Delete file"
+                  aria-label={`Delete ${f.name}`}
+                  style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                >
+                  <TrashIcon />
+                </button>
               </td>
             </tr>
           ))}

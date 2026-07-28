@@ -183,6 +183,24 @@ export function getDownloadUrl(idToken: string, mountPath: string, path: string)
   );
 }
 
+// ----- Upload / delete (anyone with access to the mount) -----
+/** Get a presigned PUT URL to upload a file to `path` (relative to the mount). */
+export function getUploadUrl(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ uploadUrl: string; expiresInSeconds: number }>(
+    `/browse/${encodeURIComponent(mountPath)}/upload-url?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+/** Permanently delete a file from the mount (bucket is unversioned). */
+export function deleteFile(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ ok: boolean }>(
+    `/browse/${encodeURIComponent(mountPath)}/file?${qs}`,
+    { method: "DELETE", idToken },
+  );
+}
+
 // ----- Public file sharing (admin) -----
 /** Make a file publicly downloadable; returns the stable shareable URL. */
 export function setFilePublic(idToken: string, mountPath: string, path: string) {
