@@ -6,7 +6,8 @@ import {
   BrowseFile, BrowseFolder,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { ClipboardIcon, TrashIcon, YELLOW } from "../lib/icons";
+import { TrashIcon } from "../lib/icons";
+import { PublicButton } from "../lib/PublicButton";
 
 function fmtBytes(n: number) {
   if (!n) return "—";
@@ -53,38 +54,8 @@ function PublicCell({ mountPath, file }: { mountPath: string; file: BrowseFile }
   };
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 8 }}>
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={busy}
-        title={isPublic ? "Public — click to make private" : "Make this file public"}
-        style={{
-          background: isPublic ? YELLOW : "transparent",
-          color: isPublic ? "#1a1d23" : YELLOW,
-          border: `1px solid ${YELLOW}`,
-          padding: "4px 10px",
-          borderRadius: 6,
-          fontWeight: 600,
-          cursor: busy ? "default" : "pointer",
-        }}
-      >
-        Public
-      </button>
-      {isPublic && (
-        <button
-          type="button"
-          onClick={copy}
-          title="Copy public link"
-          aria-label="Copy public link"
-          style={{
-            background: "transparent", border: "none", color: YELLOW,
-            cursor: "pointer", padding: 2, display: "inline-flex", alignItems: "center",
-          }}
-        >
-          {copied ? <span style={{ fontSize: 12 }}>Copied!</span> : <ClipboardIcon />}
-        </button>
-      )}
+    <span style={{ marginRight: 8 }}>
+      <PublicButton isPublic={isPublic} busy={busy} copied={copied} onToggle={toggle} onCopy={copy} />
     </span>
   );
 }

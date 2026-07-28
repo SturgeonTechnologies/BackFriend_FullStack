@@ -6,7 +6,8 @@ import {
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { ClipboardIcon, TrashIcon, YELLOW } from "../lib/icons";
+import { TrashIcon } from "../lib/icons";
+import { PublicButton } from "../lib/PublicButton";
 
 export default function Admin() {
   return (
@@ -262,22 +263,7 @@ function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted
 
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-      <button
-        type="button" onClick={togglePublic} disabled={busy}
-        title={isPublic ? "Public — click to make private" : "Make this file public"}
-        style={{
-          background: isPublic ? YELLOW : "transparent", color: isPublic ? "#1a1d23" : YELLOW,
-          border: `1px solid ${YELLOW}`, padding: "4px 10px", borderRadius: 6, fontWeight: 600,
-        }}
-      >
-        Public
-      </button>
-      {isPublic && (
-        <button type="button" onClick={copy} title="Copy public link" aria-label="Copy public link"
-          style={{ background: "transparent", border: "none", color: YELLOW, cursor: "pointer", padding: 2, display: "inline-flex", alignItems: "center" }}>
-          {copied ? <span style={{ fontSize: 12 }}>Copied!</span> : <ClipboardIcon />}
-        </button>
-      )}
+      <PublicButton isPublic={isPublic} busy={busy} copied={copied} onToggle={togglePublic} onCopy={copy} />
       <button type="button" onClick={download}>Download</button>
       <button type="button" className="danger" onClick={remove} title="Delete file" aria-label={`Delete ${file.name}`}
         style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}>
