@@ -300,21 +300,19 @@ function EmailChips({
     const d = draft.trim().toLowerCase();
     return knownEmails.filter((e) => !emails.includes(e) && (d === "" || e.includes(d))).slice(0, 8);
   };
-  const canAdd = isEmail(draft.trim().toLowerCase()) && !emails.includes(draft.trim().toLowerCase());
 
   return (
     <div>
-      <div style={{ position: "relative", display: "flex", gap: 8 }}>
+      <div style={{ position: "relative" }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } }}
-          placeholder="add an email — pick from invited / active users"
+          placeholder="type or pick an email to add"
           autoComplete="off"
         />
-        <button type="button" onClick={() => add(draft)} disabled={!canAdd} style={{ whiteSpace: "nowrap" }}>Add</button>
         {focused && suggestions().length > 0 && (
           <div className="autocomplete-panel">
             {suggestions().map((e) => (
