@@ -3,15 +3,17 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** Mid-migration — the live AWS resources are being
-> renamed from `rom-hub-dev` to `schuit-sharing-prod`. Code rename
-> is committed; AWS cutover is in progress (SSM creds copied, SES
-> stack redeployed, DKIM revalidating). See [`TODO.md`](./TODO.md)
-> for the resume runbook (steps 4–11).
+> **Status:** Live on `schuit-sharing-prod`. The `rom-hub-dev` →
+> `schuit-sharing-prod` cutover is **done** (2026-07-28) — CloudFront
+> `/api/*` now targets the new backend and the SPA is built against the
+> new Cognito pool. Remaining: bootstrap admin via first sign-in, then
+> tear down the dead `rom-hub-dev` / `rom-hub-email` stacks (TODO steps
+> 8, 10–11).
 >
-> SES is still in *sandbox* mode — only verified recipients can
-> receive mail until production access is requested via the SES
-> console.
+> SES is still in *sandbox* mode — only verified recipients can receive
+> **invite** mail until production access is requested via the SES
+> console. (Email/password *verification* codes use Cognito's own
+> sender, which is not subject to the sandbox.)
 
 - Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
   the Cognito hosted UI; email/password users self-register through the invite gate
