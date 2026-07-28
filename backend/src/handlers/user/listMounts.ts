@@ -22,8 +22,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
         mountPath: m.mountPath,
         displayName: m.displayName,
         description: m.description ?? "",
-        // Admins also see who the mount is shared with so they can manage it.
-        ...(caller.isAdmin ? { allowedEmails: m.allowedEmails ?? [] } : {}),
+        // Admins also see who the mount is shared with + its S3 prefix so they
+        // can manage it (match a mount to a directory in the explorer).
+        ...(caller.isAdmin ? { allowedEmails: m.allowedEmails ?? [], prefix: m.prefix } : {}),
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
 

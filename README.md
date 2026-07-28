@@ -3,20 +3,29 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** Mid-migration — the live AWS resources are being
-> renamed from `rom-hub-dev` to `schuit-sharing-prod`. Code rename
-> is committed; AWS cutover is in progress (SSM creds copied, SES
-> stack redeployed, DKIM revalidating). See [`TODO.md`](./TODO.md)
-> for the resume runbook (steps 4–11).
+> **Status:** Live on `schuit-sharing-prod`. The `rom-hub-dev` →
+> `schuit-sharing-prod` cutover is **done** (2026-07-28) — CloudFront
+> `/api/*` now targets the new backend and the SPA is built against the
+> new Cognito pool. Remaining: bootstrap admin via first sign-in, then
+> tear down the dead `rom-hub-dev` / `rom-hub-email` stacks (TODO steps
+> 8, 10–11).
 >
-> SES is still in *sandbox* mode — only verified recipients can
-> receive mail until production access is requested via the SES
-> console.
+> SES has **production access** (granted 2026-07-28) — invite mail sends to
+> any recipient (quota 50k/day). (Email/password *verification* codes use
+> Cognito's own sender, separate from SES.)
 
-- Auth: **Cognito + Google federation** (sign in with Google)
+- Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
+  the Cognito hosted UI; email/password users self-register through the invite gate
+  and verify their address with a one-time code)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
-- Admins invite other users by email; invitees just click "Sign in with Google"
-- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`)
+- Admins invite other users by email; invitees go to the site and either "Sign in
+  with Google" or "Sign in with email" → "Sign up"
+- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
+
+> **One email = one sign-in method.** Because the pool uses the email as the
+> username, a given address should use **either** Google **or** a password, not both.
+> Signing up a password account for an email that already signs in with Google (or
+> vice-versa) collides in Cognito. Automatic account-linking is not configured.
 - Everything behind a single CloudFront distribution on `sharing.schuit.io`
 
 ## Layout
@@ -350,7 +359,12 @@ In Admin → **Invite a user**:
   and the recipient isn't verified, the form shows a warning + the link
   so you can paste it yourself.
 
-They just go to https://sharing.schuit.io and click **Sign in with Google**. The `preSignUp` Lambda trigger lets them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and marks the invite redeemed.
+They go to https://sharing.schuit.io and either **Sign in with Google** or
+**Sign in with email → Sign up** (email/password users get a one-time verification
+code — sent by Cognito's default email sender, which is *not* subject to the SES
+sandbox, so it reaches any invitee). Either way, the `preSignUp` Lambda trigger lets
+them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and
+marks the invite redeemed.
 
 ## Local development
 

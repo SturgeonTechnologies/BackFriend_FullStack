@@ -16,6 +16,7 @@ provider:
     STAGE: ${self:provider.stage}
     INVITES_TABLE: !Ref InvitesTable
     MOUNTS_TABLE: !Ref MountsTable
+    PUBLIC_SHARES_TABLE: !Ref PublicSharesTable
     # NOTE: USER_POOL_ID is intentionally NOT injected here. Doing so makes
     # every Lambda DependOn UserPool, which creates a circular dependency
     # via UserPool.LambdaConfig (which references the trigger Lambdas).
@@ -42,6 +43,7 @@ provider:
       allowedMethods:
         - GET
         - POST
+        - PUT
         - DELETE
         - OPTIONS
     authorizers:
@@ -66,6 +68,8 @@ provider:
           Resource:
             - !GetAtt InvitesTable.Arn
             - !GetAtt MountsTable.Arn
+            - !GetAtt PublicSharesTable.Arn
+            - !Sub "${PublicSharesTable.Arn}/index/*"
         # S3: the shared bucket we browse into
         - Effect: Allow
           Action:
@@ -75,6 +79,11 @@ provider:
         - Effect: Allow
           Action:
             - s3:GetObject
+            # PutObject: "Create Directory" (folder marker) + presigned uploads.
+            # DeleteObject: the per-file delete action. Both are scoped to the
+            # shares bucket and gated in code (mount access + prefix guard).
+            - s3:PutObject
+            - s3:DeleteObject
           Resource:
             - !Sub "arn:aws:s3:::${self:custom.sharesBucket}/*"
         # Cognito admin APIs for group membership + post-auth provisioning.
@@ -87,6 +96,8 @@ provider:
             - cognito-idp:AdminRemoveUserFromGroup
             - cognito-idp:AdminListGroupsForUser
             - cognito-idp:AdminGetUser
+            - cognito-idp:ListUsers
+            - cognito-idp:ListUsersInGroup
           Resource:
             - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
         # SES: send invite emails. Resource is wildcarded to all identities
@@ -168,6 +179,12 @@ functions:
   postAuth:
     handler: src/handlers/triggers/postAuth.handler
 
+  # Pre Token Generation — the trigger that actually fires for hosted-UI /
+  # federated sign-ins. Provisions groups + redeems invites and overrides the
+  # token's cognito:groups so admin/other membership takes effect immediately.
+  preTokenGen:
+    handler: src/handlers/triggers/preTokenGen.handler
+
   # --- Admin: invites ---
   createInvite:
     handler: src/handlers/admin/createInvite.handler
@@ -181,16 +198,64 @@ functions:
     handler: src/handlers/admin/revokeInvite.handler
     events:
       - httpApi: { method: DELETE, path: "/admin/invites/{email}", authorizer: { name: cognito } }
+  listAccess:
+    handler: src/handlers/admin/listAccess.handler
+    events:
+      - httpApi: { method: GET, path: /admin/access, authorizer: { name: cognito } }
 
   # --- Admin: mounts ---
   createMount:
     handler: src/handlers/admin/createMount.handler
     events:
       - httpApi: { method: POST, path: /admin/mounts, authorizer: { name: cognito } }
+  updateMount:
+    handler: src/handlers/admin/updateMount.handler
+    events:
+      - httpApi: { method: PUT, path: "/admin/mounts/{mountPath}", authorizer: { name: cognito } }
   deleteMount:
     handler: src/handlers/admin/deleteMount.handler
     events:
       - httpApi: { method: DELETE, path: "/admin/mounts/{mountPath}", authorizer: { name: cognito } }
+
+  # --- Admin: raw-bucket explorer (discover directories to mount) ---
+  exploreBucket:
+    handler: src/handlers/admin/exploreBucket.handler
+    events:
+      - httpApi: { method: GET, path: /admin/explore, authorizer: { name: cognito } }
+  createFolder:
+    handler: src/handlers/admin/createFolder.handler
+    events:
+      - httpApi: { method: POST, path: /admin/explore/folder, authorizer: { name: cognito } }
+  # Explorer file actions (raw S3 key, admin-only): download, delete, public.
+  exploreDownloadUrl:
+    handler: src/handlers/admin/exploreDownloadUrl.handler
+    events:
+      - httpApi: { method: GET, path: /admin/explore/download-url, authorizer: { name: cognito } }
+  exploreDeleteFile:
+    handler: src/handlers/admin/exploreDeleteFile.handler
+    events:
+      - httpApi: { method: DELETE, path: /admin/explore/file, authorizer: { name: cognito } }
+  explorePublic:
+    handler: src/handlers/admin/explorePublic.handler
+    events:
+      - httpApi: { method: POST, path: /admin/explore/public, authorizer: { name: cognito } }
+      - httpApi: { method: DELETE, path: /admin/explore/public, authorizer: { name: cognito } }
+
+  # --- Admin: per-file public sharing ---
+  setPublic:
+    handler: src/handlers/admin/setPublic.handler
+    events:
+      - httpApi: { method: POST, path: "/browse/{mountPath}/public", authorizer: { name: cognito } }
+  unsetPublic:
+    handler: src/handlers/admin/unsetPublic.handler
+    events:
+      - httpApi: { method: DELETE, path: "/browse/{mountPath}/public", authorizer: { name: cognito } }
+
+  # --- Public: resolve a share token to a presigned download (NO authorizer) ---
+  resolvePublic:
+    handler: src/handlers/public/resolvePublic.handler
+    events:
+      - httpApi: { method: GET, path: "/public/{token}" }
 
   # --- Authenticated: directory browser ---
   listMounts:
@@ -205,6 +270,14 @@ functions:
     handler: src/handlers/user/browseDownloadUrl.handler
     events:
       - httpApi: { method: GET, path: "/browse/{mountPath}/download-url", authorizer: { name: cognito } }
+  uploadUrl:
+    handler: src/handlers/user/uploadUrl.handler
+    events:
+      - httpApi: { method: POST, path: "/browse/{mountPath}/upload-url", authorizer: { name: cognito } }
+  deleteFile:
+    handler: src/handlers/user/deleteFile.handler
+    events:
+      - httpApi: { method: DELETE, path: "/browse/{mountPath}/file", authorizer: { name: cognito } }
 
 resources:
   Resources:
@@ -250,6 +323,14 @@ resources:
         Principal: cognito-idp.amazonaws.com
         SourceArn: !GetAtt UserPool.Arn
 
+    PreTokenGenInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt PreTokenGenLambdaFunction.Arn
+        Principal: cognito-idp.amazonaws.com
+        SourceArn: !GetAtt UserPool.Arn
+
     GoogleIdentityProvider:
       Type: AWS::Cognito::UserPoolIdentityProvider
       Properties:
@@ -278,7 +359,12 @@ resources:
         UserPoolId: !Ref UserPool
         ClientName: ${self:service}-${self:provider.stage}-web
         GenerateSecret: false
+        # COGNITO enables the hosted UI's native email/password form (plus the
+        # self-service "Sign up" and "Forgot password" screens). Google stays for
+        # federated sign-in. Both flows funnel through the same OAuth `code` +
+        # PKCE exchange, so the app-side handling is identical.
         SupportedIdentityProviders:
+          - COGNITO
           - Google
         AllowedOAuthFlows: [code]
         AllowedOAuthFlowsUserPoolClient: true
@@ -300,6 +386,9 @@ resources:
         UserPoolId: !Ref UserPool
         Description: Administrators who can send invites and manage mounts
         Precedence: 1
+    # NOTE: the classic hosted-UI dark theme is applied post-deploy via
+    # scripts/wire-cognito-triggers.mjs (SetUICustomization) — CloudFormation
+    # has no resource type for Cognito UI customization.
 
     # ---------- DynamoDB ----------
     InvitesTable:
@@ -324,6 +413,27 @@ resources:
           - { AttributeName: mountPath, AttributeType: S }
         KeySchema:
           - { AttributeName: mountPath, KeyType: HASH }
+
+    # Per-file public shares. PK=mountPath, SK=path (file relative to the mount
+    # prefix). The random `token` in the public URL is looked up via TokenIndex.
+    PublicSharesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-public-shares
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - { AttributeName: mountPath, AttributeType: S }
+          - { AttributeName: path, AttributeType: S }
+          - { AttributeName: token, AttributeType: S }
+        KeySchema:
+          - { AttributeName: mountPath, KeyType: HASH }
+          - { AttributeName: path, KeyType: RANGE }
+        GlobalSecondaryIndexes:
+          - IndexName: TokenIndex
+            KeySchema:
+              - { AttributeName: token, KeyType: HASH }
+            Projection:
+              ProjectionType: ALL
 
   Outputs:
     UserPoolId:

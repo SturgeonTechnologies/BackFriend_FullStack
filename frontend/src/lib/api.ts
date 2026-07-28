@@ -70,6 +70,17 @@ export function revokeInvite(idToken: string, email: string) {
   });
 }
 
+// ----- Access list (admin): everyone who can sign in + pending invites -----
+export interface AccessEntry {
+  email: string;
+  role: "admin" | "member";
+  status: "active" | "pending";
+  expiresAt?: string;
+}
+export function listAccess(idToken: string) {
+  return request<{ access: AccessEntry[] }>("/admin/access", { idToken });
+}
+
 // ----- Mounts (admin) -----
 export interface Mount {
   mountPath: string;
@@ -77,10 +88,12 @@ export interface Mount {
   description: string;
   /**
    * Only populated when the caller is an admin. If undefined or empty, the
-   * mount is visible to every authenticated user; otherwise only listed
-   * lowercase emails (plus admins) can see it.
+   * mount is admins-only; otherwise only listed lowercase emails (plus admins)
+   * can see it.
    */
   allowedEmails?: string[];
+  /** S3 prefix — admin-only; used to match a mount to an explorer directory. */
+  prefix?: string;
 }
 export function createMount(
   idToken: string,
@@ -106,6 +119,74 @@ export function deleteMount(idToken: string, mountPath: string) {
     idToken,
   });
 }
+/** Update an existing mount's access list (and optionally name/description). */
+export function updateMount(
+  idToken: string,
+  mountPath: string,
+  body: { allowedEmails?: string[] | null; displayName?: string; description?: string },
+) {
+  return request<Mount>(`/admin/mounts/${encodeURIComponent(mountPath)}`, {
+    method: "PUT",
+    idToken,
+    body: JSON.stringify(body),
+  });
+}
+
+// ----- Bucket explorer (admin) -----
+export interface ExploreEntry { name: string; path: string; }
+export interface ExploreFile extends ExploreEntry {
+  size: number;
+  lastModified?: string;
+  public?: boolean;
+  publicUrl?: string;
+}
+export interface ExploreResult {
+  bucket: string;
+  prefix: string;
+  folders: ExploreEntry[];
+  files: ExploreFile[];
+  truncated: boolean;
+  nextToken?: string;
+}
+/**
+ * Admin-only raw-bucket browser. `prefix` is a full S3 key prefix (empty = bucket
+ * root); a returned folder's `path` is the full key to hand straight to
+ * createMount as the mount's `prefix`.
+ */
+export function exploreBucket(idToken: string, prefix = "", token?: string) {
+  const qs = new URLSearchParams();
+  if (prefix) qs.set("prefix", prefix);
+  if (token) qs.set("token", token);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<ExploreResult>(`/admin/explore${suffix}`, { idToken });
+}
+/** Create an empty directory at `prefix` in the shares bucket. */
+export function createFolder(idToken: string, prefix: string, name: string) {
+  return request<{ ok: boolean; prefix: string }>("/admin/explore/folder", {
+    method: "POST",
+    idToken,
+    body: JSON.stringify({ prefix, name }),
+  });
+}
+/** Explorer file actions, addressed by full S3 key (admin-only). */
+export function exploreDownloadUrl(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ downloadUrl: string; filename: string }>(
+    `/admin/explore/download-url?${qs}`, { idToken });
+}
+export function exploreDeleteFile(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ ok: boolean }>(`/admin/explore/file?${qs}`, { method: "DELETE", idToken });
+}
+export function exploreSetPublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ public: boolean; token: string; publicUrl: string }>(
+    `/admin/explore/public?${qs}`, { method: "POST", idToken });
+}
+export function exploreUnsetPublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ public: boolean }>(`/admin/explore/public?${qs}`, { method: "DELETE", idToken });
+}
 
 // ----- Browse (any authenticated user) -----
 export function listMounts(idToken: string) {
@@ -113,7 +194,16 @@ export function listMounts(idToken: string) {
 }
 
 export interface BrowseFolder { name: string; path: string; }
-export interface BrowseFile { name: string; path: string; size: number; lastModified?: string; }
+export interface BrowseFile {
+  name: string;
+  path: string;
+  size: number;
+  lastModified?: string;
+  /** Admin-only: whether this file is currently shared via a public link. */
+  public?: boolean;
+  /** Admin-only: the public URL (present when `public` is true). */
+  publicUrl?: string;
+}
 export function browseList(
   idToken: string,
   mountPath: string,
@@ -139,5 +229,41 @@ export function getDownloadUrl(idToken: string, mountPath: string, path: string)
   return request<{ downloadUrl: string; expiresInSeconds: number; filename: string }>(
     `/browse/${encodeURIComponent(mountPath)}/download-url?${qs}`,
     { idToken },
+  );
+}
+
+// ----- Upload / delete (anyone with access to the mount) -----
+/** Get a presigned PUT URL to upload a file to `path` (relative to the mount). */
+export function getUploadUrl(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ uploadUrl: string; expiresInSeconds: number }>(
+    `/browse/${encodeURIComponent(mountPath)}/upload-url?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+/** Permanently delete a file from the mount (bucket is unversioned). */
+export function deleteFile(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ ok: boolean }>(
+    `/browse/${encodeURIComponent(mountPath)}/file?${qs}`,
+    { method: "DELETE", idToken },
+  );
+}
+
+// ----- Public file sharing (admin) -----
+/** Make a file publicly downloadable; returns the stable shareable URL. */
+export function setFilePublic(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ public: boolean; token: string; publicUrl: string }>(
+    `/browse/${encodeURIComponent(mountPath)}/public?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+/** Revoke public sharing for a file. */
+export function unsetFilePublic(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ public: boolean }>(
+    `/browse/${encodeURIComponent(mountPath)}/public?${qs}`,
+    { method: "DELETE", idToken },
   );
 }

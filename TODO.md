@@ -5,11 +5,14 @@ delete the line, when they're done.
 
 ## Active
 
-- [ ] **Mid-migration: `rom-hub-dev` → `schuit-sharing-prod`.**
-      Code rename is committed and pushed (`e627569`). AWS resources
-      are partially cut over. Pick up at step 4 below.
+- [ ] **Migration `rom-hub-dev` → `schuit-sharing-prod`: CUTOVER DONE
+      (2026-07-28); only teardown/cleanup (steps 10–11) remain.**
+      The live site now runs entirely on `schuit-sharing-prod`
+      (CloudFront `/api/*` → `g35h6wblu7`, pool `us-east-1_8Zf0FwRVl`,
+      SPA built against it). The old `rom-hub-dev` backend + `rom-hub-email`
+      stacks are now dead weight — tear them down (steps 10–11).
 
-      **Migration progress (as of 2026-04-26):**
+      **Migration progress:**
         - [x] Step 1: SSM Google creds copied
               `/rom-hub/dev/google/*` → `/schuit-sharing/prod/google/*`.
         - [x] Step 2: Old `rom-hub-email` stack deleted; new
@@ -20,31 +23,35 @@ delete the line, when they're done.
               the old SES identity).
         - [x] Step 4: DKIM verified.
         - [x] Step 5: New backend stack `schuit-sharing-prod`
-              deployed (commit `4337069` fixed the SSM region/path
-              resolution that was blocking it). API Gateway:
+              deployed. API Gateway
               `g35h6wblu7.execute-api.us-east-1.amazonaws.com`.
-              Endpoints + 10 Lambdas live. `wire-triggers:prod`
-              status — TBD; confirm it ran.
-        - [ ] Step 6: Add new Cognito hosted-UI redirect URI to
-              Google OAuth client. **Resume here.** Get the URL
-              from `aws cloudformation describe-stacks
-              --stack-name schuit-sharing-prod
-              --query 'Stacks[0].Outputs[?OutputKey==\`CognitoDomain\`]'`.
-              Add `<CognitoDomain>/oauth2/idpresponse` to the OAuth
-              client's Authorized redirect URIs.
-        - [ ] Step 7: Update CloudFront `ApiGatewayDomain` parameter
-              on the existing `rom-hub-frontend` stack:
-              `cd infrastructure && STACK_NAME=rom-hub-frontend
-              STAGE=prod ./deploy.sh`. Also rebuild the SPA with
-              the new VITE_USER_POOL_CLIENT_ID and VITE_COGNITO_DOMAIN
-              from the new stack outputs, then `aws s3 sync` the
-              dist + invalidate CloudFront.
-        - [ ] Step 8: Sign in once to bootstrap admin on the new
-              User Pool.
-        - [ ] Step 9: Smoke test (mount + invite + email delivery).
-        - [ ] Step 10: Tear down old `rom-hub-dev` backend stack.
-        - [ ] Step 11: Cleanup — delete old SSM params + remove old
-              Cognito redirect URI from Google OAuth client.
+              `wire-triggers:prod` confirmed (LambdaConfig points at
+              the new preSignUp/postAuth).
+        - [x] Step 6: New Cognito hosted-UI redirect URI
+              (`schuit-sharing-prod-587449585882.auth.us-east-1
+              .amazoncognito.com/oauth2/idpresponse`) is registered
+              in the Google OAuth client — verified Google shows its
+              account chooser for the new domain (no redirect_uri_mismatch).
+        - [x] Step 7: CloudFront repointed via
+              `STACK_NAME=rom-hub-frontend STAGE=prod ./deploy.sh`
+              (`ApiGatewayDomain` → `g35h6wblu7`). SPA rebuilt against
+              the new pool, `aws s3 sync`'d to `s3://schuit-sharing/web/`,
+              CloudFront invalidated. Live SPA + API both on the new
+              backend (verified `/api/admin/explore` → 401, not 404).
+        - [ ] Step 8: **Sign in once to bootstrap admin on the new
+              pool. RESUME HERE** — riley signs in with Google (or
+              email/password) at sharing.schuit.io; `postAuth` sees
+              `riley.schuit@gmail.com` in BOOTSTRAP_ADMIN_EMAILS and
+              adds the admins group. Can't be scripted (needs real auth).
+        - [~] Step 9: Smoke test. `roms` mount was seeded directly
+              into `schuit-sharing-prod-mounts` (matches the old one).
+              After step 8: verify browse/download + invite + the new
+              email/password signup + the admin bucket explorer.
+        - [ ] Step 10: Tear down old `rom-hub-dev` backend stack
+              (+ `rom-hub-email` SES stack).
+        - [ ] Step 11: Cleanup — delete old `/rom-hub/dev/google/*`
+              SSM params + remove the old `rom-hub-dev-*` Cognito
+              redirect URI from the Google OAuth client.
         - [ ] (Optional, later) Rename frontend stack
               `rom-hub-frontend` → `schuit-sharing-frontend`. Requires
               CloudFront re-create (~20–30 min downtime). Defer.
@@ -130,12 +137,23 @@ delete the line, when they're done.
       # default STACK_NAME=schuit-sharing-frontend, STAGE=prod
       ```
 
-- [ ] **SES is still in sandbox.** End-to-end send was verified on
-      the prior identity (2026-04-26). After the rename migration
-      finishes, re-verify with a fresh send. To remove sandbox
-      restrictions: SES console → Account dashboard → "Request
-      production access". Bumps quota from 200/day to ~50,000/day
-      and removes the verified-recipient restriction.
+- [ ] **Email/password verification uses Cognito's default sender, not SES.**
+      Deliberate while SES is in sandbox (SES-backed Cognito email can only
+      reach SES-verified recipients, which would break signup for new
+      invitees). Once SES production access lands, optionally switch the pool
+      to `EmailConfiguration.EmailSendingAccount: DEVELOPER` with
+      `From: noreply@schuit.io` + the `schuit.io` identity SourceArn for
+      branded, higher-limit verification emails.
+
+- [ ] **No Google↔password account linking.** One email should use one method.
+      If a user needs both, wire `AdminLinkProviderForUser` in `preSignUp`
+      (external-provider path) to merge into the existing native user.
+
+- [x] **SES production access GRANTED (2026-07-28).** Requested via
+      `aws sesv2 put-account-details --production-access-enabled
+      --mail-type TRANSACTIONAL ...` and auto-approved instantly. Quota
+      is now 50,000/day @ 14/sec; the verified-recipient (sandbox)
+      restriction is gone, so invite emails send to anyone.
 
 - [ ] **Hosted-UI logout requires an exact LogoutURLs match.** The
       registered URLs both end with `/`

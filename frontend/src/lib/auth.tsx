@@ -58,6 +58,7 @@ export interface AuthState {
   idToken: string | null;
   loading: boolean;
   loginWithGoogle: (returnTo?: string) => Promise<void>;
+  loginWithEmail: (returnTo?: string) => Promise<void>;
   logout: () => void;
   handleCallback: () => Promise<string | null>; // returns returnTo path (if any)
 }
@@ -81,7 +82,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const loginWithGoogle = useCallback(async (returnTo?: string) => {
+  // Shared start of the OAuth Authorization Code + PKCE flow. Both sign-in
+  // buttons use the exact same code→token exchange (handleCallback); the only
+  // difference is whether we pin `identity_provider`:
+  //   - "Google"    → hosted UI bounces straight to Google.
+  //   - undefined   → hosted UI shows its own page (email/password form,
+  //                   "Sign up", "Forgot password", and a Google button).
+  const startAuthorize = useCallback(async (identityProvider?: string, returnTo?: string) => {
     const verifier = randomVerifier();
     const challenge = await challengeFromVerifier(verifier);
     const state = randomState();
@@ -94,13 +101,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,
       scope: "openid email profile",
-      identity_provider: "Google",
       code_challenge_method: "S256",
       code_challenge: challenge,
       state,
     });
+    if (identityProvider) params.set("identity_provider", identityProvider);
     window.location.assign(`${COGNITO_DOMAIN}/oauth2/authorize?${params.toString()}`);
   }, []);
+
+  const loginWithGoogle = useCallback(
+    (returnTo?: string) => startAuthorize("Google", returnTo),
+    [startAuthorize],
+  );
+
+  const loginWithEmail = useCallback(
+    (returnTo?: string) => startAuthorize(undefined, returnTo),
+    [startAuthorize],
+  );
 
   const logout = useCallback(() => {
     clearTokens();
@@ -175,10 +192,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       idToken: tokens?.idToken ?? null,
       loading,
       loginWithGoogle,
+      loginWithEmail,
       logout,
       handleCallback,
     }),
-    [claims, tokens, loading, loginWithGoogle, logout, handleCallback],
+    [claims, tokens, loading, loginWithGoogle, loginWithEmail, logout, handleCallback],
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
