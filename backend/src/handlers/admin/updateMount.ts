@@ -4,6 +4,7 @@ import { ddb, MOUNTS_TABLE } from "../../lib/db";
 import { requireAdmin } from "../../lib/auth";
 import { ok, error, parseJson } from "../../lib/response";
 import { getMount, normalizeMountPath, normalizeAllowedEmails } from "../../lib/mounts";
+import { ensureInvitesFor } from "../../lib/invites";
 
 interface Body {
   /** Replace the allowed-emails list. Empty/omitted-with-key removes it (mount
@@ -21,7 +22,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
   event: APIGatewayProxyEventV2WithJWTAuthorizer,
 ) => {
   try {
-    requireAdmin(event);
+    const caller = requireAdmin(event);
 
     const mountPath = normalizeMountPath(decodeURIComponent(event.pathParameters?.mountPath ?? ""));
     if (!mountPath) return error(400, "mountPath is required");
@@ -35,10 +36,12 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     const removes: string[] = [];
     const names: Record<string, string> = {};
     const values: Record<string, unknown> = {};
+    let grantedEmails: string[] = [];
 
     if ("allowedEmails" in body) {
       const cleaned = normalizeAllowedEmails(body.allowedEmails);
       if (cleaned) {
+        grantedEmails = cleaned;
         sets.push("#ae = :ae");
         names["#ae"] = "allowedEmails";
         values[":ae"] = cleaned;
@@ -75,7 +78,12 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       }),
     );
 
-    return ok(res.Attributes);
+    // Auto-invite anyone newly granted access who isn't invited/joined yet.
+    const autoInvited = grantedEmails.length
+      ? await ensureInvitesFor(grantedEmails, caller.email ?? caller.sub)
+      : [];
+
+    return ok({ ...res.Attributes, autoInvited });
   } catch (e: any) {
     if (e.statusCode) return error(e.statusCode, e.message);
     console.error(e);

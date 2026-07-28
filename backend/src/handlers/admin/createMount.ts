@@ -9,6 +9,7 @@ import {
   normalizePrefix,
   normalizeAllowedEmails,
 } from "../../lib/mounts";
+import { ensureInvitesFor } from "../../lib/invites";
 
 interface Body {
   mountPath: string;   // e.g. "roms"
@@ -59,7 +60,13 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       }),
     );
 
-    return created(item);
+    // Auto-invite anyone granted access who isn't invited/joined yet, so the
+    // access grant works even before they've accepted an invitation.
+    const autoInvited = allowedEmails
+      ? await ensureInvitesFor(allowedEmails, caller.email ?? caller.sub)
+      : [];
+
+    return created({ ...item, autoInvited });
   } catch (e: any) {
     if (e.name === "ConditionalCheckFailedException") {
       return error(409, "A mount with that path already exists");

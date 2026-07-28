@@ -95,6 +95,9 @@ export interface Mount {
   /** S3 prefix — admin-only; used to match a mount to an explorer directory. */
   prefix?: string;
 }
+/** Mount responses from create/update also report any invites auto-created for
+ *  newly-granted emails that weren't invited/joined yet. */
+export type MountWrite = Mount & { autoInvited?: string[] };
 export function createMount(
   idToken: string,
   body: {
@@ -103,11 +106,11 @@ export function createMount(
     displayName: string;
     description?: string;
     bucket?: string;
-    /** Optional access control. Empty/omitted = visible to everyone. */
+    /** Optional access control. Empty/omitted = admins-only. */
     allowedEmails?: string[];
   },
 ) {
-  return request<Mount>("/admin/mounts", {
+  return request<MountWrite>("/admin/mounts", {
     method: "POST",
     idToken,
     body: JSON.stringify(body),
@@ -125,7 +128,7 @@ export function updateMount(
   mountPath: string,
   body: { allowedEmails?: string[] | null; displayName?: string; description?: string },
 ) {
-  return request<Mount>(`/admin/mounts/${encodeURIComponent(mountPath)}`, {
+  return request<MountWrite>(`/admin/mounts/${encodeURIComponent(mountPath)}`, {
     method: "PUT",
     idToken,
     body: JSON.stringify(body),

@@ -356,6 +356,13 @@ function MountsCard() {
   const [allowedEmailsList, setAllowedEmailsList] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const noteAutoInvited = (autoInvited?: string[]) => {
+    if (autoInvited && autoInvited.length) {
+      setNotice(`Also created invites so they can sign in: ${autoInvited.join(", ")}`);
+    }
+  };
 
   // Bucket explorer state.
   const [exp, setExp] = useState<ExploreResult | null>(null);
@@ -440,9 +447,10 @@ function MountsCard() {
   const handleSaveAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !editMount) return;
-    setSavingEdit(true); setErr(null);
+    setSavingEdit(true); setErr(null); setNotice(null);
     try {
-      await updateMount(idToken, editMount.mountPath, { allowedEmails: editEmailsList });
+      const res = await updateMount(idToken, editMount.mountPath, { allowedEmails: editEmailsList });
+      noteAutoInvited(res.autoInvited);
       setEditMount(null);
       await refresh();
     } catch (e: any) { setErr(e.message); }
@@ -453,26 +461,25 @@ function MountsCard() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setNotice(null);
     try {
       const np = mountPath.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
       const existing = mounts.find((m) => m.mountPath === np);
-      if (existing) {
-        await updateMount(idToken, existing.mountPath, {
-          allowedEmails: allowedEmailsList,
-          displayName: displayName.trim(),
-          description: description.trim(),
-        });
-      } else {
-        await createMount(idToken, {
-          mountPath: mountPath.trim(),
-          displayName: displayName.trim(),
-          prefix: prefix.trim(),
-          description: description.trim() || undefined,
-          bucket: bucket.trim() || undefined,
-          allowedEmails: allowedEmailsList.length ? allowedEmailsList : undefined,
-        });
-      }
+      const res = existing
+        ? await updateMount(idToken, existing.mountPath, {
+            allowedEmails: allowedEmailsList,
+            displayName: displayName.trim(),
+            description: description.trim(),
+          })
+        : await createMount(idToken, {
+            mountPath: mountPath.trim(),
+            displayName: displayName.trim(),
+            prefix: prefix.trim(),
+            description: description.trim() || undefined,
+            bucket: bucket.trim() || undefined,
+            allowedEmails: allowedEmailsList.length ? allowedEmailsList : undefined,
+          });
+      noteAutoInvited(res.autoInvited);
       await refresh();
     } catch (e: any) { setErr(e.message); }
     finally { setBusy(false); }
@@ -651,6 +658,9 @@ function MountsCard() {
           </button>
         </form>
         {err && <p className="err">{err}</p>}
+        {notice && (
+          <p className="muted" style={{ marginTop: "0.5rem", color: "var(--success)" }}>{notice}</p>
+        )}
       </div>
 
       <div className="card">
