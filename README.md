@@ -10,10 +10,9 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 > tear down the dead `rom-hub-dev` / `rom-hub-email` stacks (TODO steps
 > 8, 10–11).
 >
-> SES is still in *sandbox* mode — only verified recipients can receive
-> **invite** mail until production access is requested via the SES
-> console. (Email/password *verification* codes use Cognito's own
-> sender, which is not subject to the sandbox.)
+> SES has **production access** (granted 2026-07-28) — invite mail sends to
+> any recipient (quota 50k/day). (Email/password *verification* codes use
+> Cognito's own sender, separate from SES.)
 
 - Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
   the Cognito hosted UI; email/password users self-register through the invite gate

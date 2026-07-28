@@ -149,12 +149,11 @@ delete the line, when they're done.
       If a user needs both, wire `AdminLinkProviderForUser` in `preSignUp`
       (external-provider path) to merge into the existing native user.
 
-- [ ] **SES is still in sandbox.** End-to-end send was verified on
-      the prior identity (2026-04-26). After the rename migration
-      finishes, re-verify with a fresh send. To remove sandbox
-      restrictions: SES console → Account dashboard → "Request
-      production access". Bumps quota from 200/day to ~50,000/day
-      and removes the verified-recipient restriction.
+- [x] **SES production access GRANTED (2026-07-28).** Requested via
+      `aws sesv2 put-account-details --production-access-enabled
+      --mail-type TRANSACTIONAL ...` and auto-approved instantly. Quota
+      is now 50,000/day @ 14/sec; the verified-recipient (sandbox)
+      restriction is gone, so invite emails send to anyone.
 
 - [ ] **Hosted-UI logout requires an exact LogoutURLs match.** The
       registered URLs both end with `/`
