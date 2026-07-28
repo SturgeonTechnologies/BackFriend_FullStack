@@ -1,5 +1,7 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyHandlerV2WithJWTAuthorizer } from "aws-lambda";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { requireAdmin } from "../../lib/auth";
+import { ddb, PUBLIC_SHARES_TABLE, BUCKET_PUBLIC_PARTITION } from "../../lib/db";
 import { ok, error } from "../../lib/response";
 import { listDir } from "../../lib/s3";
 
@@ -38,6 +40,22 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     const token = event.queryStringParameters?.token;
     const res = await listDir(bucket, prefix, token);
 
+    // Public-share state for the files at this level, keyed by full S3 key.
+    // Explorer shares live under the reserved BUCKET_PUBLIC_PARTITION.
+    const publicTokens = new Map<string, string>();
+    const shares = await ddb.send(
+      new QueryCommand({
+        TableName: PUBLIC_SHARES_TABLE,
+        KeyConditionExpression: "mountPath = :m AND begins_with(#p, :pre)",
+        ExpressionAttributeNames: { "#p": "path" },
+        ExpressionAttributeValues: { ":m": BUCKET_PUBLIC_PARTITION, ":pre": prefix },
+      }),
+    );
+    for (const s of shares.Items ?? []) {
+      if (s.path && s.token) publicTokens.set(String(s.path), String(s.token));
+    }
+    const siteOrigin = process.env.SITE_ORIGIN ?? "";
+
     return ok({
       bucket,
       prefix,
@@ -46,12 +64,17 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
         name: k.slice(prefix.length).replace(/\/$/, ""),
         path: k, // full S3 key, e.g. "Video/Movies/" — becomes the mount prefix
       })),
-      files: res.files.map((f) => ({
-        name: f.key.slice(prefix.length),
-        path: f.key,
-        size: f.size,
-        lastModified: f.lastModified,
-      })),
+      files: res.files.map((f) => {
+        const shareToken = publicTokens.get(f.key);
+        return {
+          name: f.key.slice(prefix.length),
+          path: f.key,
+          size: f.size,
+          lastModified: f.lastModified,
+          public: !!shareToken,
+          publicUrl: shareToken ? `${siteOrigin}/api/public/${shareToken}` : undefined,
+        };
+      }),
       truncated: res.truncated,
       nextToken: res.nextContinuationToken,
     });

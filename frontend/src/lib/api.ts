@@ -109,7 +109,12 @@ export function deleteMount(idToken: string, mountPath: string) {
 
 // ----- Bucket explorer (admin) -----
 export interface ExploreEntry { name: string; path: string; }
-export interface ExploreFile extends ExploreEntry { size: number; lastModified?: string; }
+export interface ExploreFile extends ExploreEntry {
+  size: number;
+  lastModified?: string;
+  public?: boolean;
+  publicUrl?: string;
+}
 export interface ExploreResult {
   bucket: string;
   prefix: string;
@@ -137,6 +142,25 @@ export function createFolder(idToken: string, prefix: string, name: string) {
     idToken,
     body: JSON.stringify({ prefix, name }),
   });
+}
+/** Explorer file actions, addressed by full S3 key (admin-only). */
+export function exploreDownloadUrl(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ downloadUrl: string; filename: string }>(
+    `/admin/explore/download-url?${qs}`, { idToken });
+}
+export function exploreDeleteFile(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ ok: boolean }>(`/admin/explore/file?${qs}`, { method: "DELETE", idToken });
+}
+export function exploreSetPublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ public: boolean; token: string; publicUrl: string }>(
+    `/admin/explore/public?${qs}`, { method: "POST", idToken });
+}
+export function exploreUnsetPublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ public: boolean }>(`/admin/explore/public?${qs}`, { method: "DELETE", idToken });
 }
 
 // ----- Browse (any authenticated user) -----

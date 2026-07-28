@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   listInvites, createInvite, revokeInvite, Invite,
   createMount, deleteMount, listMounts, Mount,
-  exploreBucket, createFolder, ExploreResult,
+  exploreBucket, createFolder, ExploreResult, ExploreFile,
+  exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { ClipboardIcon, TrashIcon, YELLOW } from "../lib/icons";
 
 export default function Admin() {
   return (
@@ -216,6 +218,71 @@ function parentPrefix(p: string): string {
   return i >= 0 ? t.slice(0, i + 1) : "";
 }
 
+// Public / Download / Delete controls for a file in the bucket explorer,
+// addressed by full S3 key (admin-only). Mirrors Browse.tsx's PublicCell.
+function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted: () => void }) {
+  const { idToken } = useAuth();
+  const [isPublic, setIsPublic] = useState(!!file.public);
+  const [url, setUrl] = useState<string | undefined>(file.publicUrl);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const togglePublic = async () => {
+    if (!idToken || busy) return;
+    setBusy(true);
+    try {
+      if (isPublic) { await exploreUnsetPublic(idToken, file.path); setIsPublic(false); setUrl(undefined); }
+      else { const r = await exploreSetPublic(idToken, file.path); setIsPublic(true); setUrl(r.publicUrl); }
+    } catch (e: any) { alert(e.message ?? "Failed to update public sharing"); }
+    finally { setBusy(false); }
+  };
+
+  const copy = async () => {
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { window.prompt("Copy this public link:", url); }
+  };
+
+  const download = async () => {
+    if (!idToken) return;
+    try { const { downloadUrl } = await exploreDownloadUrl(idToken, file.path); window.location.assign(downloadUrl); }
+    catch (e: any) { alert(e.message ?? "Download failed"); }
+  };
+
+  const remove = async () => {
+    if (!idToken) return;
+    if (!confirm(`Permanently delete "${file.name}"? This deletes the file from S3 and cannot be undone.`)) return;
+    try { await exploreDeleteFile(idToken, file.path); onDeleted(); }
+    catch (e: any) { alert(e.message ?? "Delete failed"); }
+  };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+      <button
+        type="button" onClick={togglePublic} disabled={busy}
+        title={isPublic ? "Public — click to make private" : "Make this file public"}
+        style={{
+          background: isPublic ? YELLOW : "transparent", color: isPublic ? "#1a1d23" : YELLOW,
+          border: `1px solid ${YELLOW}`, padding: "4px 10px", borderRadius: 6, fontWeight: 600,
+        }}
+      >
+        Public
+      </button>
+      {isPublic && (
+        <button type="button" onClick={copy} title="Copy public link" aria-label="Copy public link"
+          style={{ background: "transparent", border: "none", color: YELLOW, cursor: "pointer", padding: 2, display: "inline-flex", alignItems: "center" }}>
+          {copied ? <span style={{ fontSize: 12 }}>Copied!</span> : <ClipboardIcon />}
+        </button>
+      )}
+      <button type="button" onClick={download}>Download</button>
+      <button type="button" className="danger" onClick={remove} title="Delete file" aria-label={`Delete ${file.name}`}
+        style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}>
+        <TrashIcon />
+      </button>
+    </span>
+  );
+}
+
 function MountsCard() {
   const { idToken } = useAuth();
   const [mounts, setMounts] = useState<Mount[]>([]);
@@ -415,7 +482,7 @@ function MountsCard() {
                 <td className="muted">📄 {f.name}</td>
                 <td className="muted">file</td>
                 <td className="muted">{formatSize(f.size)}</td>
-                <td></td>
+                <td><ExplorerFileActions file={f} onDeleted={() => loadExplore(expPrefix)} /></td>
               </tr>
             ))}
             {exp && !exp.folders.length && !exp.files.length && (

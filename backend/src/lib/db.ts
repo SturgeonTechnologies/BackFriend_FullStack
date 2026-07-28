@@ -10,6 +10,13 @@ export const INVITES_TABLE = process.env.INVITES_TABLE!;
 export const MOUNTS_TABLE = process.env.MOUNTS_TABLE!;
 export const PUBLIC_SHARES_TABLE = process.env.PUBLIC_SHARES_TABLE!;
 
+/**
+ * Reserved PublicSharesTable partition for admin explorer shares, which are
+ * keyed by the full S3 key (no mount). Safe as a sentinel because real
+ * mountPaths must match ^[a-z0-9]… and can never start with "_".
+ */
+export const BUCKET_PUBLIC_PARTITION = "__bucket__";
+
 export interface InviteRow {
   email: string;
   groups: string[];
