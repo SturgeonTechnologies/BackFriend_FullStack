@@ -3,16 +3,16 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** Live on `schuit-sharing-prod`. The `rom-hub-dev` →
-> `schuit-sharing-prod` cutover is **done** (2026-07-28) — CloudFront
-> `/api/*` now targets the new backend and the SPA is built against the
-> new Cognito pool. Remaining: bootstrap admin via first sign-in, then
-> tear down the dead `rom-hub-dev` / `rom-hub-email` stacks (TODO steps
-> 8, 10–11).
+> **Status:** Live on `schuit-sharing-prod` (the `rom-hub-dev` →
+> `schuit-sharing-prod` cutover completed 2026-07-28; admin is bootstrapped).
+> Only cleanup remains: tear down the dead `rom-hub-dev` / `rom-hub-email`
+> stacks (TODO steps 10–11).
 >
-> SES has **production access** (granted 2026-07-28) — invite mail sends to
-> any recipient (quota 50k/day). (Email/password *verification* codes use
-> Cognito's own sender, separate from SES.)
+> SES has **production access** — invite mail sends to any recipient (quota
+> 50k/day). (Email/password *verification* codes use Cognito's own sender,
+> separate from SES.) The shares bucket is fully private — **S3 Public Access
+> Block is on**; the only ways to reach a file are a signed-in browse/download
+> (5-min presigned GET) or an explicit per-file "public" token link.
 
 - Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
   the Cognito hosted UI; email/password users self-register through the invite gate
@@ -21,6 +21,16 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 - Admins invite other users by email; invitees go to the site and either "Sign in
   with Google" or "Sign in with email" → "Sign up"
 - Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
+
+### Features
+
+- **Auth:** Google + email/password (both via the Cognito hosted UI, themed to match the site).
+- **Mounts** with per-mount access control (`allowedEmails`; blank = admins-only). **Add/modify** a mount or manage its users from the Admin page (with email autocomplete + auto-invite of anyone granted who isn't invited yet).
+- **Invites/Access** — invite users; the list shows everyone with access (active users + pending invites).
+- **Admin bucket explorer** — browse the raw bucket, **create** a directory, **delete** a directory (type-name + "confirm" guard), and per-file Public / Download / Delete.
+- **Browse** any mount you can see: **download** (presigned), **upload** files, admins can **delete**, and admins can toggle a file **Public** (opaque token → presigned redirect, revocable, bucket stays private).
+- **Global file search** across every mount you can access.
+- **Profile** page + a user dropdown menu.
 
 > **One email = one sign-in method.** Because the pool uses the email as the
 > username, a given address should use **either** Google **or** a password, not both.
@@ -35,15 +45,16 @@ schuit-sharing/
 ├── backend/                      Serverless Framework app (Lambda + API GW + Cognito + DDB + S3)
 │   ├── serverless.yml
 │   └── src/
-│       ├── lib/                  Shared helpers (auth, DDB, S3, Cognito, mounts)
+│       ├── lib/                  Shared helpers (auth, DDB, S3, Cognito, mounts, invites, provision)
 │       └── handlers/
-│           ├── triggers/         Cognito Lambda triggers (preSignUp, postAuth)
-│           ├── admin/            Admin-only (invites, mounts)
-│           └── user/             Authenticated (listMounts, browseList, browseDownloadUrl)
+│           ├── triggers/         Cognito triggers (preSignUp, postAuth, preTokenGen)
+│           ├── admin/            Admin-only (invites/access, mounts, explorer, public sharing)
+│           ├── public/           Unauthenticated public-share resolver (/public/{token})
+│           └── user/             Authenticated (mounts, browse, download, upload, delete, search)
 ├── frontend/                     React + Vite SPA
 │   └── src/
-│       ├── lib/                  auth (OAuth + PKCE), API client, pkce helpers
-│       └── pages/                Login, Callback, Home, Browse, Admin
+│       ├── lib/                  auth (OAuth + PKCE), API client, pkce, icons, PublicButton
+│       └── pages/                Login, Callback, Home (+ search), Browse, Admin, Profile
 └── infrastructure/
     ├── frontend-infra.yml        CloudFormation: ACM + S3 + CloudFront + Route 53
     └── email-infra.yml           CloudFormation: SES domain identity + DKIM + MAIL FROM
@@ -67,12 +78,14 @@ schuit-sharing/
   ┌─────────────────┐                       │       │
   │ Cognito User    │◀──OAuth/PKCE (browser)┘       │
   │ Pool (hosted UI)│                               │
-  │ + Google IdP    │                               │
+  │ Google + email  │                               │
+  │/password        │                               │
   └─────────────────┘                               │
                         ┌──────────────┐            │
                         │ DynamoDB     │◀───────────┤
                         │ invites +    │            │
-                        │ mounts       │            │
+                        │ mounts +     │            │
+                        │ public-shares│            │
                         └──────────────┘            │
                         ┌──────────────┐            │
                         │ S3: schuit-  │◀───────────┘
@@ -270,6 +283,9 @@ aws ses get-identity-verification-attributes \
 
 ### Sandbox mode (one-time gate)
 
+> This account **already has SES production access** — the steps below only
+> apply to a fresh account.
+
 A new SES account is in **sandbox**: you can only send to *verified*
 recipient addresses (max 200 messages/day, 1/sec). For initial testing,
 verify your own inbox:
@@ -388,11 +404,13 @@ Add `http://localhost:5173/auth/callback` to:
 ## Security notes
 
 - **Cognito is the trust boundary.** The API Gateway JWT authorizer validates every request. Lambdas extract `email`, `sub`, and `cognito:groups` from verified claims.
+- **Provisioning runs in the `preTokenGen` trigger**, not `postAuth` — the Post Authentication trigger does *not* fire for hosted-UI/federated sign-ins, so admin-bootstrap, group assignment, and invite-redemption live in Pre Token Generation (which does fire) and it overrides `cognito:groups` so the current token is correct.
 - **Invites live in DynamoDB with TTL**; expired rows are removed automatically by DynamoDB TTL.
-- **Bucket is private.** Downloads are 5-minute S3 presigned GET URLs minted per-request. Every download is logged (CloudWatch) with caller email, mount, and S3 key.
-- **Directory traversal** (`..`, `\`) is rejected by `safeSubpath` in `backend/src/lib/mounts.ts`.
-- **CloudFront → S3** uses OAC; the bucket policy allows only the distribution.
-- **CloudFront → API** uses the `AllViewerExceptHostHeader` origin request policy, so `Authorization` is forwarded, but Host is rewritten to API Gateway's domain.
+- **Bucket is fully private.** S3 **Public Access Block is on** (legacy public object ACLs are ignored). Authenticated downloads are 5-minute presigned GETs minted per-request (logged to CloudWatch with caller email, mount, key). The only public path is an explicit per-file share: an opaque token in `public-shares` that the unauthenticated `/public/{token}` endpoint resolves to a fresh presigned GET (revocable).
+- **Writes are code-gated.** Upload/create-dir/delete use `s3:PutObject`/`s3:DeleteObject` on the shares bucket, restricted in code to a mount's prefix (with `..`/`\` traversal guards). File/directory **delete is admin-only**; the bucket is unversioned so deletes are permanent.
+- **Directory traversal** (`..`, `\`) is rejected in `backend/src/lib/mounts.ts` and the explorer/upload/delete handlers.
+- **CloudFront → S3** uses OAC; the bucket policy allows only the distribution. **CloudFront → API** uses `AllViewerExceptHostHeader` so `Authorization` is forwarded and Host is rewritten to API Gateway.
+- **One email = one sign-in method** (Google *or* password) — the pool keys on email as username; mixing collides.
 
 ## Tighten for production
 
@@ -400,5 +418,8 @@ Add `http://localhost:5173/auth/callback` to:
 - Publish the Google OAuth consent screen out of **Testing** so invitees can sign in without being test users.
 - Add a WAF web ACL to the CloudFront distribution.
 - Add CloudWatch alarms on Lambda errors/throttles and DynamoDB throttles.
-- Turn on MFA in Cognito (`MfaConfiguration: OPTIONAL`) — Google already enforces its own, but local accounts (if you add any) should have it.
+- Turn on MFA in Cognito (`MfaConfiguration: OPTIONAL`) for the email/password accounts.
 - Consider CloudFront signed URLs for very large files; S3 presigned GETs are fine up to a few hundred MB.
+- Stand up CI/CD (GitHub Actions) so deploys aren't manual — see `TODO.md` for the captured plan (OIDC roles, per-stage workflows).
+
+Done already: SES production access, and the S3 Public Access Block lockdown described above.

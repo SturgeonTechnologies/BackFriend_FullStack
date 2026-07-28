@@ -40,21 +40,31 @@ npx serverless deploy --stage prod
 
 This provisions:
 
-- `UserPool` — Cognito User Pool with Google as external IdP (created **without** Lambda triggers — see step 3)
+- `UserPool` — Cognito User Pool with **`COGNITO` (email/password) + Google** as IdPs (created **without** Lambda triggers — see step 3)
 - `UserPoolClient` — OAuth code + PKCE, callback URLs wired to both prod (`https://sharing.schuit.io/auth/callback`) and dev (`http://localhost:5173/auth/callback`)
 - `UserPoolDomain` — hosted UI domain (Amazon-provided: `schuit-sharing-<stage>-<acct>.auth.<region>.amazoncognito.com`)
-- `InvitesTable` (DynamoDB, email PK, TTL)
-- `MountsTable` (DynamoDB, mountPath PK)
-- Lambdas: `preSignUp`, `postAuth`, `createInvite`, `listInvites`, `revokeInvite`, `createMount`, `deleteMount`, `listMounts`, `browseList`, `browseDownloadUrl`
-- HTTP API with a JWT authorizer pointing at the User Pool
+- `InvitesTable` (DynamoDB, email PK, TTL), `MountsTable` (mountPath PK), `PublicSharesTable` (mountPath+path PK, `TokenIndex` GSI on the token)
+- Lambdas:
+  - *triggers:* `preSignUp`, `postAuth`, `preTokenGen`
+  - *admin:* `createInvite`, `listInvites`, `revokeInvite`, `listAccess`, `createMount`, `updateMount`, `deleteMount`, `exploreBucket`, `createFolder`, `deleteDirectory`, `exploreDownloadUrl`, `exploreDeleteFile`, `explorePublic`, `setPublic`, `unsetPublic`
+  - *user:* `listMounts`, `search`, `browseList`, `browseDownloadUrl`, `uploadUrl`, `deleteFile`
+  - *public (no authorizer):* `resolvePublic` (`GET /public/{token}`)
+- HTTP API with a JWT authorizer pointing at the User Pool (the `/public/{token}` route is intentionally unauthenticated)
 
-## 3. Wire the Cognito Lambda triggers
+## 3. Wire the Cognito Lambda triggers (and hosted-UI theme)
 
-The `preSignUp` and `postAuth` Lambdas can't be wired into the UserPool's
-`LambdaConfig` from CloudFormation — doing so creates a circular dependency
-(UserPool → trigger Lambdas → IAM role + HttpApi authorizer → UserPool).
-Instead, run the post-deploy script. It's idempotent — safe to re-run after
-every deploy.
+The `preSignUp`, `postAuth`, and `preTokenGen` Lambdas can't be wired into the
+UserPool's `LambdaConfig` from CloudFormation — doing so creates a circular
+dependency (UserPool → trigger Lambdas → IAM role + HttpApi authorizer →
+UserPool). Instead, run the post-deploy script. It also applies the hosted-UI
+dark-theme CSS (`SetUICustomization`, which has no CloudFormation resource).
+It's idempotent — safe to re-run after every deploy.
+
+> **Which trigger does what:** `preSignUp` gates who may sign up (bootstrap
+> admin or an active invite). **`preTokenGen`** does the real provisioning —
+> bootstrap-admin promotion, invite group assignment, and marking the invite
+> redeemed — because it fires for hosted-UI/federated sign-ins. `postAuth` does
+> *not* fire for the hosted UI (it stays wired for completeness only).
 
 ```bash
 npm run wire-triggers:prod     # the live deployment
@@ -67,13 +77,14 @@ Output:
 ```
 ==> Looking up resources from stack schuit-sharing-prod in us-east-1
     UserPoolId       = us-east-1_XXXXXXXXX
-    PreSignUp ARN    = arn:aws:lambda:us-east-1:...:function:schuit-sharing-prod-preSignUp
-    PostAuth ARN     = arn:aws:lambda:us-east-1:...:function:schuit-sharing-prod-postAuth
+    PreSignUp ARN    = ...:function:schuit-sharing-prod-preSignUp
+    PostAuth ARN     = ...:function:schuit-sharing-prod-postAuth
+    PreTokenGen ARN  = ...:function:schuit-sharing-prod-preTokenGen
+==> Applying hosted-UI customization (dark theme)
 ==> Fetching current UserPool config
 ==> Updating UserPool with new LambdaConfig
 ==> Done. Triggers are now wired:
-    PreSignUp:          arn:aws:lambda:us-east-1:...:schuit-sharing-prod-preSignUp
-    PostAuthentication: arn:aws:lambda:us-east-1:...:schuit-sharing-prod-postAuth
+    PreSignUp / PostAuthentication / PreTokenGeneration
 ```
 
 The script reads the current pool config and re-passes everything (because
@@ -81,9 +92,10 @@ The script reads the current pool config and re-passes everything (because
 Lambda `InvokeFunction` permissions for the Cognito principal are already
 granted by the CloudFormation stack — the script only sets the `LambdaConfig`.
 
-> **You must run this once after the first deploy** for sign-in to work.
-> Sign-in will succeed on the Cognito side but no admins will be auto-bootstrapped
-> (and any future invite-based users won't be gated) until the triggers are wired.
+> **You must run this once after the first deploy.** Until the triggers are
+> wired, sign-up isn't gated by invites and no one gets provisioned (no admin
+> bootstrap, no group/invite handling) — because `preSignUp`/`preTokenGen`
+> aren't attached to the pool yet.
 
 If you re-run `serverless deploy` and the trigger ARNs don't change (they
 won't unless you rename the functions or change the stage), `UpdateUserPool`
@@ -120,7 +132,7 @@ Without this, the "Sign in with Google" flow will fail with `redirect_uri_mismat
 `riley.schuit@gmail.com` is set as the bootstrap admin via `BOOTSTRAP_ADMIN_EMAILS` in `serverless.yml`. On first sign-in:
 
 - The `preSignUp` trigger allows the user in (bootstrap list bypasses the invite check).
-- The `postAuth` trigger adds them to the `admins` Cognito group.
+- The `preTokenGen` trigger adds them to the `admins` Cognito group (and overrides the token's `cognito:groups` so the first token already carries it).
 
 To change the bootstrap admin, edit `custom.bootstrapAdmins` in `serverless.yml` and redeploy.
 
@@ -130,7 +142,7 @@ To change the bootstrap admin, edit `custom.bootstrapAdmins` in `serverless.yml`
 npx serverless remove --stage prod
 ```
 
-This tears down Lambdas, API Gateway, the User Pool, and both DynamoDB tables. It does **not** touch the shared `schuit-sharing` S3 bucket (by design).
+This tears down Lambdas, API Gateway, the User Pool, and all three DynamoDB tables. It does **not** touch the shared `schuit-sharing` S3 bucket (by design).
 
 ## Local invocation
 
@@ -152,7 +164,7 @@ npx serverless logs --function browseList --stage prod --tail
 
 Set in `serverless.yml` → `provider.environment`:
 
-- `INVITES_TABLE`, `MOUNTS_TABLE`
+- `INVITES_TABLE`, `MOUNTS_TABLE`, `PUBLIC_SHARES_TABLE`
 - `ADMIN_GROUP` (default `admins`)
 - `SHARES_BUCKET` (default `schuit-sharing`)
 - `BOOTSTRAP_ADMIN_EMAILS` (comma-separated, lowercase)
@@ -170,11 +182,15 @@ from `event.userPoolId` (which Cognito provides on every invocation).
 
 The Lambda execution role has the minimum needed:
 
-- `dynamodb:*Item`, `Query`, `Scan` on `InvitesTable` + `MountsTable`
-- `s3:ListBucket`, `s3:GetObject` on `arn:aws:s3:::schuit-sharing` + `/*`
-- `cognito-idp:AdminAddUserToGroup`, `AdminListGroupsForUser`, `AdminGetUser` scoped to `userpool/*` (wildcard — using `!GetAtt UserPool.Arn` would create a circular dependency)
+- `dynamodb:*Item`, `Query`, `Scan` on `InvitesTable` + `MountsTable` + `PublicSharesTable` (and its `TokenIndex`)
+- `s3:ListBucket` on `arn:aws:s3:::schuit-sharing`; `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `/*` (Put/Delete are used by create-dir, upload, and delete; code-gated to mount prefixes)
+- `cognito-idp:AdminAddUserToGroup`, `AdminRemoveUserFromGroup`, `AdminListGroupsForUser`, `AdminGetUser`, `ListUsers`, `ListUsersInGroup` scoped to `userpool/*` (wildcard — using `!GetAtt UserPool.Arn` would create a circular dependency)
 - `ses:SendEmail`, `ses:SendRawEmail` scoped to `arn:aws:ses:us-east-1:<acct>:identity/*` (wildcard for the same coupling reason — the SES identity lives in a separate `schuit-sharing-email` CFN stack)
 - `ssm:GetParameter` (only during deploy, for the Google creds)
+
+The **S3 Public Access Block** on the shares bucket is set out-of-band (`aws s3api
+put-bucket-cors` / `put-public-access-block`), not by this stack. Browser uploads
+need a bucket CORS rule allowing `PUT` from the site origin — also set out-of-band.
 
 ## SES email identity
 
@@ -191,8 +207,9 @@ cd ../infrastructure
 # wait 5–60 min for DKIM CNAMEs to verify
 aws ses get-identity-verification-attributes \
   --region us-east-1 --identities schuit.io
-# new SES accounts start in sandbox: verify a recipient first if testing
-aws ses verify-email-identity --region us-east-1 \
-  --email-address riley.schuit@gmail.com
-# then request production access from the SES console once DKIM is Verified
 ```
+
+This account already has **SES production access** (invite mail sends to any
+recipient, 50k/day). A brand-new account would start in sandbox; request
+production access via `aws sesv2 put-account-details --production-access-enabled
+--mail-type TRANSACTIONAL ...` (or the SES console) once DKIM is Verified.

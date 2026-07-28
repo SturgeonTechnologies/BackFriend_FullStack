@@ -26,6 +26,19 @@ This stack owns the bucket policy on `SiteBucket`. If you already set a policy o
 
 (Today there's no problem — Lambda accesses ROM files via IAM-granted roles, not the bucket policy.)
 
+> **Out-of-band bucket settings (not in this template):** the shares bucket has
+> **S3 Public Access Block enabled** (so legacy public object ACLs are ignored —
+> the bucket is fully private) and a **CORS rule** allowing `PUT`/`GET` from the
+> site origin (needed for browser uploads). Both are set with `aws s3api
+> put-public-access-block` / `put-bucket-cors`, not CloudFormation. If the bucket
+> is recreated, re-apply them.
+
+> **Heads-up on the live stack name:** the deployed front-door stack is still
+> named **`rom-hub-frontend`** (from before the rename; never re-created to avoid
+> CloudFront downtime). A fresh deploy from this template uses
+> `schuit-sharing-frontend`. Use the right `--stack-name` for the environment
+> you're touching.
+
 ## How DNS works here
 
 > **You don't need a separate Route 53 hosted zone for `sharing.schuit.io`.**

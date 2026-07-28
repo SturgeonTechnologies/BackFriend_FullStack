@@ -1,6 +1,6 @@
 # Frontend deployment
 
-React 18 + Vite SPA. Auth is OAuth 2.0 authorization-code + PKCE against the Cognito hosted UI (Google as IdP). No `amazon-cognito-identity-js` dependency — all auth is handled directly by the browser talking to Cognito.
+React 18 + Vite SPA. Auth is OAuth 2.0 authorization-code + PKCE against the Cognito hosted UI — **Google or email/password** (same flow; the email button just omits `identity_provider`). No `amazon-cognito-identity-js` dependency — all auth is handled directly by the browser talking to Cognito.
 
 ## Prereqs
 
@@ -99,11 +99,12 @@ Then: `DISTRIBUTION_ID=... npm run deploy`.
 
 ## Routes
 
-- `/login` — "Sign in with Google" button (redirects to Cognito hosted UI)
+- `/login` — "Sign in with Google" *and* "Sign in with email" buttons (both → Cognito hosted UI)
 - `/auth/callback` — exchanges the OAuth code for tokens (PKCE), stores them in `localStorage` key `rh_tokens`
-- `/` — Home: lists mounts configured by an admin
-- `/browse/:mountPath` — directory browser (`?path=<subpath>`)
-- `/admin` — admins only: manage invites and mounts
+- `/` — Home: global file **search** + the list of mounts you can access
+- `/browse/:mountPath` — directory browser (`?path=<subpath>`) with download, upload, admin delete, and admin per-file Public toggle
+- `/profile` — read-only profile (email, name, role)
+- `/admin` — admins only: Invites/Access, mounts (add/modify + manage access), and the bucket explorer (browse, create/delete directory, per-file actions)
 
 SPA routing is made to work on CloudFront by mapping 403/404 to `/index.html` (see `../infrastructure/frontend-infra.yml`).
 
@@ -123,6 +124,7 @@ SPA routing is made to work on CloudFront by mapping 403/404 to `/index.html` (s
 | `VITE_COGNITO_DOMAIN`      | `https://schuit-sharing-prod-123.auth.us-east-1.amazoncognito.com` | Full URL, no trailing slash            |
 | `VITE_REDIRECT_URI`        | `https://sharing.schuit.io/auth/callback`                          | Must be registered on the App Client   |
 | `VITE_LOGOUT_REDIRECT`     | `https://sharing.schuit.io/`                                       | Must be registered on the App Client   |
+| `VITE_APP_TITLE`           | `Schuit Sharing`                                                   | Browser tab title (optional; build-time, defaults via `vite.config.ts`) |
 
 ## Troubleshooting
 
