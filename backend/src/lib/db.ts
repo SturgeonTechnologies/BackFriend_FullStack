@@ -8,6 +8,7 @@ export const ddb = DynamoDBDocumentClient.from(base, {
 
 export const INVITES_TABLE = process.env.INVITES_TABLE!;
 export const MOUNTS_TABLE = process.env.MOUNTS_TABLE!;
+export const PUBLIC_SHARES_TABLE = process.env.PUBLIC_SHARES_TABLE!;
 
 export interface InviteRow {
   email: string;
@@ -31,6 +32,16 @@ export interface MountRow {
    * (plus admins, who always see everything) can see / browse it.
    */
   allowedEmails?: string[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface PublicShareRow {
+  mountPath: string; // partition key — the mount the file lives in
+  path: string;      // sort key — file path relative to the mount prefix
+  token: string;     // opaque random id used in the public URL (GSI: TokenIndex)
+  bucket: string;    // resolved S3 bucket
+  key: string;       // full S3 object key (mount.prefix + path)
   createdBy: string;
   createdAt: string;
 }

@@ -137,7 +137,16 @@ export function listMounts(idToken: string) {
 }
 
 export interface BrowseFolder { name: string; path: string; }
-export interface BrowseFile { name: string; path: string; size: number; lastModified?: string; }
+export interface BrowseFile {
+  name: string;
+  path: string;
+  size: number;
+  lastModified?: string;
+  /** Admin-only: whether this file is currently shared via a public link. */
+  public?: boolean;
+  /** Admin-only: the public URL (present when `public` is true). */
+  publicUrl?: string;
+}
 export function browseList(
   idToken: string,
   mountPath: string,
@@ -163,5 +172,23 @@ export function getDownloadUrl(idToken: string, mountPath: string, path: string)
   return request<{ downloadUrl: string; expiresInSeconds: number; filename: string }>(
     `/browse/${encodeURIComponent(mountPath)}/download-url?${qs}`,
     { idToken },
+  );
+}
+
+// ----- Public file sharing (admin) -----
+/** Make a file publicly downloadable; returns the stable shareable URL. */
+export function setFilePublic(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ public: boolean; token: string; publicUrl: string }>(
+    `/browse/${encodeURIComponent(mountPath)}/public?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+/** Revoke public sharing for a file. */
+export function unsetFilePublic(idToken: string, mountPath: string, path: string) {
+  const qs = new URLSearchParams({ path });
+  return request<{ public: boolean }>(
+    `/browse/${encodeURIComponent(mountPath)}/public?${qs}`,
+    { method: "DELETE", idToken },
   );
 }

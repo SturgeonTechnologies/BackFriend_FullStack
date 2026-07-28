@@ -16,6 +16,7 @@ provider:
     STAGE: ${self:provider.stage}
     INVITES_TABLE: !Ref InvitesTable
     MOUNTS_TABLE: !Ref MountsTable
+    PUBLIC_SHARES_TABLE: !Ref PublicSharesTable
     # NOTE: USER_POOL_ID is intentionally NOT injected here. Doing so makes
     # every Lambda DependOn UserPool, which creates a circular dependency
     # via UserPool.LambdaConfig (which references the trigger Lambdas).
@@ -66,6 +67,8 @@ provider:
           Resource:
             - !GetAtt InvitesTable.Arn
             - !GetAtt MountsTable.Arn
+            - !GetAtt PublicSharesTable.Arn
+            - !Sub "${PublicSharesTable.Arn}/index/*"
         # S3: the shared bucket we browse into
         - Effect: Allow
           Action:
@@ -168,6 +171,12 @@ functions:
   postAuth:
     handler: src/handlers/triggers/postAuth.handler
 
+  # Pre Token Generation — the trigger that actually fires for hosted-UI /
+  # federated sign-ins. Provisions groups + redeems invites and overrides the
+  # token's cognito:groups so admin/other membership takes effect immediately.
+  preTokenGen:
+    handler: src/handlers/triggers/preTokenGen.handler
+
   # --- Admin: invites ---
   createInvite:
     handler: src/handlers/admin/createInvite.handler
@@ -197,6 +206,22 @@ functions:
     handler: src/handlers/admin/exploreBucket.handler
     events:
       - httpApi: { method: GET, path: /admin/explore, authorizer: { name: cognito } }
+
+  # --- Admin: per-file public sharing ---
+  setPublic:
+    handler: src/handlers/admin/setPublic.handler
+    events:
+      - httpApi: { method: POST, path: "/browse/{mountPath}/public", authorizer: { name: cognito } }
+  unsetPublic:
+    handler: src/handlers/admin/unsetPublic.handler
+    events:
+      - httpApi: { method: DELETE, path: "/browse/{mountPath}/public", authorizer: { name: cognito } }
+
+  # --- Public: resolve a share token to a presigned download (NO authorizer) ---
+  resolvePublic:
+    handler: src/handlers/public/resolvePublic.handler
+    events:
+      - httpApi: { method: GET, path: "/public/{token}" }
 
   # --- Authenticated: directory browser ---
   listMounts:
@@ -253,6 +278,14 @@ resources:
       Properties:
         Action: lambda:InvokeFunction
         FunctionName: !GetAtt PostAuthLambdaFunction.Arn
+        Principal: cognito-idp.amazonaws.com
+        SourceArn: !GetAtt UserPool.Arn
+
+    PreTokenGenInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt PreTokenGenLambdaFunction.Arn
         Principal: cognito-idp.amazonaws.com
         SourceArn: !GetAtt UserPool.Arn
 
@@ -335,6 +368,27 @@ resources:
           - { AttributeName: mountPath, AttributeType: S }
         KeySchema:
           - { AttributeName: mountPath, KeyType: HASH }
+
+    # Per-file public shares. PK=mountPath, SK=path (file relative to the mount
+    # prefix). The random `token` in the public URL is looked up via TokenIndex.
+    PublicSharesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-public-shares
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - { AttributeName: mountPath, AttributeType: S }
+          - { AttributeName: path, AttributeType: S }
+          - { AttributeName: token, AttributeType: S }
+        KeySchema:
+          - { AttributeName: mountPath, KeyType: HASH }
+          - { AttributeName: path, KeyType: RANGE }
+        GlobalSecondaryIndexes:
+          - IndexName: TokenIndex
+            KeySchema:
+              - { AttributeName: token, KeyType: HASH }
+            Projection:
+              ProjectionType: ALL
 
   Outputs:
     UserPoolId:

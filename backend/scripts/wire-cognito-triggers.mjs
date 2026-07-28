@@ -57,9 +57,11 @@ async function main() {
   const userPoolId = await getStackOutput("UserPoolId");
   const preSignUpArn = await getFunctionArn(`${SERVICE}-${STAGE}-preSignUp`);
   const postAuthArn = await getFunctionArn(`${SERVICE}-${STAGE}-postAuth`);
+  const preTokenGenArn = await getFunctionArn(`${SERVICE}-${STAGE}-preTokenGen`);
   console.log(`    UserPoolId       = ${userPoolId}`);
   console.log(`    PreSignUp ARN    = ${preSignUpArn}`);
   console.log(`    PostAuth ARN     = ${postAuthArn}`);
+  console.log(`    PreTokenGen ARN  = ${preTokenGenArn}`);
 
   console.log("==> Fetching current UserPool config");
   const desc = await cognito.send(new DescribeUserPoolCommand({ UserPoolId: userPoolId }));
@@ -70,13 +72,15 @@ async function main() {
     ...(pool.LambdaConfig ?? {}),
     PreSignUp: preSignUpArn,
     PostAuthentication: postAuthArn,
+    PreTokenGeneration: preTokenGenArn,
   };
 
   // Idempotency: skip if already wired correctly.
   const current = pool.LambdaConfig ?? {};
   if (
     current.PreSignUp === preSignUpArn &&
-    current.PostAuthentication === postAuthArn
+    current.PostAuthentication === postAuthArn &&
+    current.PreTokenGeneration === preTokenGenArn
   ) {
     console.log("==> LambdaConfig already up to date — nothing to do.");
     return;
@@ -110,6 +114,7 @@ async function main() {
   console.log("==> Done. Triggers are now wired:");
   console.log(`    PreSignUp:          ${preSignUpArn}`);
   console.log(`    PostAuthentication: ${postAuthArn}`);
+  console.log(`    PreTokenGeneration: ${preTokenGenArn}`);
 }
 
 main().catch((err) => {
