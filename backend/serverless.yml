@@ -381,6 +381,9 @@ resources:
         UserPoolId: !Ref UserPool
         Description: Administrators who can send invites and manage mounts
         Precedence: 1
+    # NOTE: the classic hosted-UI dark theme is applied post-deploy via
+    # scripts/wire-cognito-triggers.mjs (SetUICustomization) — CloudFormation
+    # has no resource type for Cognito UI customization.
 
     # ---------- DynamoDB ----------
     InvitesTable:

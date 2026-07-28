@@ -22,7 +22,62 @@ import {
   CognitoIdentityProviderClient,
   DescribeUserPoolCommand,
   UpdateUserPoolCommand,
+  SetUICustomizationCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+
+// Dark theme for the classic hosted UI, matching the SPA palette. Classic
+// hosted UI only styles the card/inputs/buttons (not the page body), so the
+// page surround stays Cognito's default gray. There is no CloudFormation
+// resource for this, so we apply it here post-deploy (idempotent upsert).
+const HOSTED_UI_CSS = `.background-customizable {
+  background-color: #0f1115;
+}
+.banner-customizable {
+  background-color: #171a21;
+}
+.label-customizable {
+  color: #8a93a4;
+}
+.textDescription-customizable {
+  color: #8a93a4;
+}
+.idpDescription-customizable {
+  color: #8a93a4;
+}
+.legalText-customizable {
+  color: #8a93a4;
+}
+.inputField-customizable {
+  background-color: #1d222b;
+  border: 1px solid #262c38;
+  color: #e8eaf0;
+}
+.inputField-customizable:focus {
+  border-color: #4f8cff;
+}
+.submitButton-customizable {
+  background-color: #4f8cff;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.submitButton-customizable:hover {
+  background-color: #3f7ae0;
+}
+.idpButton-customizable {
+  background-color: #1d222b;
+  border: 1px solid #262c38;
+  color: #e8eaf0;
+}
+.idpButton-customizable:hover {
+  background-color: #262c38;
+  color: #ffffff;
+}
+.errorMessage-customizable {
+  background-color: #2a1416;
+  border: 1px solid #ff5b5b;
+  color: #ff5b5b;
+}`;
 import {
   LambdaClient,
   GetFunctionCommand,
@@ -62,6 +117,14 @@ async function main() {
   console.log(`    PreSignUp ARN    = ${preSignUpArn}`);
   console.log(`    PostAuth ARN     = ${postAuthArn}`);
   console.log(`    PreTokenGen ARN  = ${preTokenGenArn}`);
+
+  // Apply the hosted-UI dark theme (idempotent). Done before the LambdaConfig
+  // idempotency short-circuit below so it always runs on re-invocation.
+  const clientId = await getStackOutput("UserPoolClientId");
+  console.log("==> Applying hosted-UI customization (dark theme)");
+  await cognito.send(
+    new SetUICustomizationCommand({ UserPoolId: userPoolId, ClientId: clientId, CSS: HOSTED_UI_CSS }),
+  );
 
   console.log("==> Fetching current UserPool config");
   const desc = await cognito.send(new DescribeUserPoolCommand({ UserPoolId: userPoolId }));
