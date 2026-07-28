@@ -43,6 +43,7 @@ provider:
       allowedMethods:
         - GET
         - POST
+        - PUT
         - DELETE
         - OPTIONS
     authorizers:
@@ -207,6 +208,10 @@ functions:
     handler: src/handlers/admin/createMount.handler
     events:
       - httpApi: { method: POST, path: /admin/mounts, authorizer: { name: cognito } }
+  updateMount:
+    handler: src/handlers/admin/updateMount.handler
+    events:
+      - httpApi: { method: PUT, path: "/admin/mounts/{mountPath}", authorizer: { name: cognito } }
   deleteMount:
     handler: src/handlers/admin/deleteMount.handler
     events:

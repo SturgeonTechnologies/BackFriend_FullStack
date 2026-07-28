@@ -117,6 +117,18 @@ export function deleteMount(idToken: string, mountPath: string) {
     idToken,
   });
 }
+/** Update an existing mount's access list (and optionally name/description). */
+export function updateMount(
+  idToken: string,
+  mountPath: string,
+  body: { allowedEmails?: string[] | null; displayName?: string; description?: string },
+) {
+  return request<Mount>(`/admin/mounts/${encodeURIComponent(mountPath)}`, {
+    method: "PUT",
+    idToken,
+    body: JSON.stringify(body),
+  });
+}
 
 // ----- Bucket explorer (admin) -----
 export interface ExploreEntry { name: string; path: string; }

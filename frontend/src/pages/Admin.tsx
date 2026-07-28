@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createInvite, revokeInvite, listAccess, AccessEntry,
-  createMount, deleteMount, listMounts, Mount,
+  createMount, deleteMount, updateMount, listMounts, Mount,
   exploreBucket, createFolder, ExploreResult, ExploreFile,
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
@@ -274,6 +274,52 @@ function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted
   );
 }
 
+// Comma-separated Allowed-emails input with autocomplete from known emails
+// (active users + pending invites). Suggests the token after the last comma,
+// excluding already-added addresses.
+function AllowedEmailsInput({
+  value, onChange, knownEmails, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  knownEmails: string[];
+  placeholder?: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const parse = (raw: string) => raw.split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const token = value.slice(value.lastIndexOf(",") + 1).trim().toLowerCase();
+  const suggestions = (): string[] => {
+    const entered = new Set(parse(value));
+    return knownEmails.filter((e) => !entered.has(e) && (token === "" || e.toLowerCase().includes(token))).slice(0, 8);
+  };
+  const pick = (email: string) => {
+    const i = value.lastIndexOf(",");
+    const prefix = i >= 0 ? value.slice(0, i + 1) + " " : "";
+    onChange(prefix + email + ", ");
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {focused && suggestions().length > 0 && (
+        <div className="autocomplete-panel">
+          {suggestions().map((e) => (
+            <div key={e} className="autocomplete-item" onMouseDown={(ev) => { ev.preventDefault(); pick(e); }}>
+              {e}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MountsCard() {
   const { idToken } = useAuth();
   const [mounts, setMounts] = useState<Mount[]>([]);
@@ -300,7 +346,11 @@ function MountsCard() {
 
   // Known emails (invites + active users) for the Allowed-emails autocomplete.
   const [knownEmails, setKnownEmails] = useState<string[]>([]);
-  const [emailFocused, setEmailFocused] = useState(false);
+
+  // "Manage access" editor for an existing mount.
+  const [editMount, setEditMount] = useState<Mount | null>(null);
+  const [editEmailsRaw, setEditEmailsRaw] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const parseEmails = (raw: string): string[] =>
     raw
@@ -359,20 +409,21 @@ function MountsCard() {
     /* eslint-disable-next-line */
   }, []);
 
-  // Autocomplete for the comma-separated Allowed-emails field: suggest known
-  // emails matching the token after the last comma, excluding ones already added.
-  const emailToken = () => allowedEmailsRaw.slice(allowedEmailsRaw.lastIndexOf(",") + 1).trim().toLowerCase();
-  const emailSuggestions = (): string[] => {
-    const entered = new Set(parseEmails(allowedEmailsRaw));
-    const tok = emailToken();
-    return knownEmails
-      .filter((e) => !entered.has(e) && (tok === "" || e.toLowerCase().includes(tok)))
-      .slice(0, 8);
+  const openEditAccess = (m: Mount) => {
+    setEditMount(m);
+    setEditEmailsRaw((m.allowedEmails ?? []).join(", "));
+    setErr(null);
   };
-  const pickEmail = (email: string) => {
-    const i = allowedEmailsRaw.lastIndexOf(",");
-    const prefix = i >= 0 ? allowedEmailsRaw.slice(0, i + 1) + " " : "";
-    setAllowedEmailsRaw(prefix + email + ", ");
+  const handleSaveAccess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!idToken || !editMount) return;
+    setSavingEdit(true); setErr(null);
+    try {
+      await updateMount(idToken, editMount.mountPath, { allowedEmails: parseEmails(editEmailsRaw) });
+      setEditMount(null);
+      await refresh();
+    } catch (e: any) { setErr(e.message); }
+    finally { setSavingEdit(false); }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -556,29 +607,12 @@ function MountsCard() {
                 — leave blank to restrict to admins only. Admins always see every mount.
               </span>
             </label>
-            <div style={{ position: "relative" }}>
-              <input
-                value={allowedEmailsRaw}
-                onChange={(e) => setAllowedEmailsRaw(e.target.value)}
-                onFocus={() => setEmailFocused(true)}
-                onBlur={() => setEmailFocused(false)}
-                placeholder="start typing — pick from invited / active users"
-                autoComplete="off"
-              />
-              {emailFocused && emailSuggestions().length > 0 && (
-                <div className="autocomplete-panel">
-                  {emailSuggestions().map((e) => (
-                    <div
-                      key={e}
-                      className="autocomplete-item"
-                      onMouseDown={(ev) => { ev.preventDefault(); pickEmail(e); }}
-                    >
-                      {e}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <AllowedEmailsInput
+              value={allowedEmailsRaw}
+              onChange={setAllowedEmailsRaw}
+              knownEmails={knownEmails}
+              placeholder="start typing — pick from invited / active users"
+            />
           </div>
           <button disabled={busy} style={{ marginTop: "0.75rem" }}>
             {busy ? "Adding…" : "Add mount"}
@@ -604,13 +638,52 @@ function MountsCard() {
                     ? m.allowedEmails.join(", ")
                     : "admins only"}
                 </td>
-                <td><button className="danger" onClick={() => handleDelete(m.mountPath)}>Remove mount</button></td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button className="secondary" onClick={() => openEditAccess(m)}>Manage access</button>
+                  <button className="danger" style={{ marginLeft: 8 }} onClick={() => handleDelete(m.mountPath)}>Remove mount</button>
+                </td>
               </tr>
             ))}
             {!mounts.length && <tr><td colSpan={5} className="muted">No mounts yet.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {editMount && (
+        <div
+          onMouseDown={() => setEditMount(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
+          }}
+        >
+          <form
+            onSubmit={handleSaveAccess}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="card"
+            style={{ width: 460, maxWidth: "92vw", margin: 0 }}
+          >
+            <h3 style={{ marginTop: 0 }}>Manage access — {editMount.displayName}</h3>
+            <label>
+              Allowed emails (comma-separated)
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                — leave blank to restrict to admins only.
+              </span>
+            </label>
+            <AllowedEmailsInput
+              value={editEmailsRaw}
+              onChange={setEditEmailsRaw}
+              knownEmails={knownEmails}
+              placeholder="start typing — pick from invited / active users"
+            />
+            {err && <p className="err">{err}</p>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
+              <button type="button" className="secondary" onClick={() => setEditMount(null)}>Cancel</button>
+              <button type="submit" disabled={savingEdit}>{savingEdit ? "Saving…" : "Save access"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   );
 }
