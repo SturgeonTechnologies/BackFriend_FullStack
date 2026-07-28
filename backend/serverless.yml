@@ -266,6 +266,10 @@ functions:
     handler: src/handlers/user/listMounts.handler
     events:
       - httpApi: { method: GET, path: /mounts, authorizer: { name: cognito } }
+  search:
+    handler: src/handlers/user/search.handler
+    events:
+      - httpApi: { method: GET, path: /search, authorizer: { name: cognito } }
   browseList:
     handler: src/handlers/user/browseList.handler
     events:

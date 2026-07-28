@@ -202,6 +202,21 @@ export function listMounts(idToken: string) {
   return request<{ mounts: Mount[] }>("/mounts", { idToken });
 }
 
+// ----- Global file search (any authenticated user) -----
+export interface SearchResult {
+  mountPath: string;
+  mountName: string;
+  name: string;
+  path: string;
+  size: number;
+  lastModified?: string;
+}
+export function searchFiles(idToken: string, q: string) {
+  const qs = new URLSearchParams({ q });
+  return request<{ query: string; results: SearchResult[]; truncated: boolean }>(
+    `/search?${qs}`, { idToken });
+}
+
 export interface BrowseFolder { name: string; path: string; }
 export interface BrowseFile {
   name: string;

@@ -6,6 +6,24 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const s3 = new S3Client({});
 
+export interface S3Object { key: string; size: number; lastModified?: string; }
+
+/** All objects under a prefix with metadata (paginated, no delimiter — recurses). */
+export async function listAllObjects(bucket: string, prefix: string): Promise<S3Object[]> {
+  const out: S3Object[] = [];
+  let token: string | undefined;
+  do {
+    const res = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of res.Contents ?? []) {
+      if (o.Key) out.push({ key: o.Key, size: o.Size ?? 0, lastModified: o.LastModified?.toISOString() });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
 /** All object keys under a prefix (paginated, no delimiter — recurses). */
 export async function listAllKeys(bucket: string, prefix: string): Promise<string[]> {
   const keys: string[] = [];
