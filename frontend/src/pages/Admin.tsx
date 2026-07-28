@@ -114,7 +114,8 @@ function InvitesCard() {
               padding: "0.75rem",
               border: "1px solid",
               borderColor: result.kind === "success" ? "#1f6feb" : "#b58900",
-              background: result.kind === "success" ? "#f0f6ff" : "#fff8e1",
+              background: result.kind === "success" ? "#12233d" : "#2a2410",
+              color: "var(--text)",
               borderRadius: 6,
               fontSize: 14,
             }}
@@ -137,7 +138,7 @@ function InvitesCard() {
                   Invite created for <strong>{result.email}</strong>, but the email failed to send.
                 </div>
                 {result.emailError && (
-                  <div style={{ marginTop: 4, fontSize: 13, color: "#7a5a00" }}>
+                  <div style={{ marginTop: 4, fontSize: 13, color: "#e3b341" }}>
                     SES error: <code>{result.emailError}</code>
                   </div>
                 )}
