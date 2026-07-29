@@ -145,9 +145,19 @@ delete the line, when they're done.
       `From: noreply@schuit.io` + the `schuit.io` identity SourceArn for
       branded, higher-limit verification emails.
 
-- [ ] **No Google↔password account linking.** One email should use one method.
-      If a user needs both, wire `AdminLinkProviderForUser` in `preSignUp`
-      (external-provider path) to merge into the existing native user.
+- [ ] **No account linking across sign-in methods.** One email should use one
+      method (Google, Facebook, or password) — now a three-way concern since
+      Facebook OAuth was added. If a user needs more than one, wire
+      `AdminLinkProviderForUser` in `preSignUp` (external-provider path) to merge
+      into the existing user.
+
+- [x] **Facebook OAuth added (branch `feat/facebook-oauth`).** `FacebookIdentityProvider`
+      in `serverless.yml` (comma-separated scopes, no `email_verified` mapping,
+      `api_version: v21.0`), added to the client's `SupportedIdentityProviders`;
+      `loginWithFacebook` + a Login button on the frontend. Manual steps before it
+      works: create a Meta app, store `/schuit-sharing/prod/facebook/{client_id,client_secret}`
+      in SSM, `serverless deploy --stage prod`, register the `/oauth2/idpresponse`
+      redirect URI in the Facebook app, and flip the app to Live. See README step 1/5.
 
 - [x] **SES production access GRANTED (2026-07-28).** Requested via
       `aws sesv2 put-account-details --production-access-enabled

@@ -83,12 +83,12 @@ function InvitesCard() {
       <div className="card">
         <h3>Invite a user</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          The invitee goes to <code>sharing.schuit.io</code>, clicks "Sign in with Google", and is let in automatically.
+          The invitee goes to <code>sharing.schuit.io</code>, signs in with Google, Facebook, or email, and is let in automatically.
         </p>
         <form onSubmit={handleCreate}>
           <div className="row">
             <div>
-              <label>Email (must match the Google account they'll use)</label>
+              <label>Email (must match the account they'll sign in with)</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             <div style={{ maxWidth: 120 }}>

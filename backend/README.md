@@ -8,14 +8,16 @@ Serverless Framework app — API Gateway (HTTP API) + Lambda (Node 20) + Cognito
 - Serverless Framework v3: `npm i -g serverless`
 - AWS CLI configured with a profile that can deploy to the target account/region
 - Google OAuth client ID + secret (see `../README.md` step 1)
+- Facebook App ID + App Secret (Meta for Developers → your app → Settings → Basic)
 
-## 1. Store Google creds in SSM
+## 1. Store Google + Facebook creds in SSM
 
-The stack reads Google OAuth creds from SSM Parameter Store at deploy time.
+The stack reads both providers' OAuth creds from SSM Parameter Store at deploy time.
 
 ```bash
 STAGE=prod   # 'prod' is the live deployment; 'dev' is reserved for a future personal sandbox
 
+# --- Google ---
 aws ssm put-parameter \
   --name /schuit-sharing/$STAGE/google/client_id \
   --type String \
@@ -26,6 +28,19 @@ aws ssm put-parameter \
   --name /schuit-sharing/$STAGE/google/client_secret \
   --type SecureString \
   --value '<google-client-secret>' \
+  --overwrite
+
+# --- Facebook (client_id = App ID, client_secret = App Secret) ---
+aws ssm put-parameter \
+  --name /schuit-sharing/$STAGE/facebook/client_id \
+  --type String \
+  --value '<facebook-app-id>' \
+  --overwrite
+
+aws ssm put-parameter \
+  --name /schuit-sharing/$STAGE/facebook/client_secret \
+  --type SecureString \
+  --value '<facebook-app-secret>' \
   --overwrite
 ```
 
@@ -40,7 +55,7 @@ npx serverless deploy --stage prod
 
 This provisions:
 
-- `UserPool` — Cognito User Pool with **`COGNITO` (email/password) + Google** as IdPs (created **without** Lambda triggers — see step 3)
+- `UserPool` — Cognito User Pool with **`COGNITO` (email/password) + Google + Facebook** as IdPs (created **without** Lambda triggers — see step 3)
 - `UserPoolClient` — OAuth code + PKCE, callback URLs wired to both prod (`https://sharing.schuit.io/auth/callback`) and dev (`http://localhost:5173/auth/callback`)
 - `UserPoolDomain` — hosted UI domain (Amazon-provided: `schuit-sharing-<stage>-<acct>.auth.<region>.amazoncognito.com`)
 - `InvitesTable` (DynamoDB, email PK, TTL), `MountsTable` (mountPath PK), `PublicSharesTable` (mountPath+path PK, `TokenIndex` GSI on the token)
@@ -113,19 +128,36 @@ Write these down — they're needed by the frontend `.env.local` and the CloudFo
 |---------------------|------------------------------------|
 | `UserPoolId`        | (diagnostic)                       |
 | `UserPoolClientId`  | `frontend/.env.local`              |
-| `CognitoDomain`     | `frontend/.env.local` + Google Cloud OAuth client redirect URI |
+| `CognitoDomain`     | `frontend/.env.local` + Google Cloud **and** Facebook OAuth redirect URIs |
 | `ApiEndpoint`       | `infrastructure/frontend-infra.yml` `ApiGatewayDomain` param (use host portion only) |
 | `SharesBucketName`  | (diagnostic — this is the external bucket the app reads from, defaults to `schuit-sharing`) |
 
-## 5. Finish Google OAuth wiring
+## 5. Finish OAuth wiring (Google + Facebook)
 
-Copy the `CognitoDomain` host. In Google Cloud Console → OAuth client, add to authorized redirect URIs:
+Both providers redirect back to the **same** Cognito endpoint. Copy the
+`CognitoDomain` host and register this URL with each provider:
 
 ```
 https://<cognito-domain>/oauth2/idpresponse
 ```
 
-Without this, the "Sign in with Google" flow will fail with `redirect_uri_mismatch`.
+**Google** — Google Cloud Console → OAuth client → *Authorized redirect URIs*.
+Without this, "Sign in with Google" fails with `redirect_uri_mismatch`.
+
+**Facebook** — Meta for Developers → your app → *Facebook Login → Settings →
+Valid OAuth Redirect URIs* (add the same `idpresponse` URL). Also:
+
+- Add **Facebook Login** as a product on the app if it isn't already.
+- The app must be switched **Live** (App Review → toggle from *Development* to
+  *Live*) so users outside your dev/test roles can sign in. The
+  `public_profile` and `email` permissions are granted by default and do **not**
+  require App Review.
+- Facebook only allows **HTTPS** redirect URIs, so local `http://localhost`
+  testing goes through the deployed Cognito domain regardless of stage — the
+  callback lands on Cognito (HTTPS), which then returns to your app.
+
+Without this, "Sign in with Facebook" fails with a "URL blocked" / redirect-URI
+error on Facebook's consent screen.
 
 ## 6. Bootstrap admin (automatic)
 

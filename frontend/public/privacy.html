@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index, follow" />
+    <title>Privacy Policy — Schuit Sharing</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #171a21;
+        --panel-2: #1d222b;
+        --border: #262c38;
+        --text: #e8eaf0;
+        --muted: #8a93a4;
+        --accent: #4f8cff;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 4rem;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 2rem 2.25rem;
+      }
+      h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.15rem; margin: 2rem 0 0.5rem; }
+      .muted { color: var(--muted); }
+      .updated { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+      ul { padding-left: 1.25rem; }
+      li { margin: 0.35rem 0; }
+      code {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0.1rem 0.35rem;
+        font-size: 0.9em;
+      }
+      hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+      .back { display: inline-block; margin-top: 1.5rem; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="card">
+        <h1>Privacy Policy</h1>
+        <p class="updated">Schuit Sharing · Last updated July 28, 2026</p>
+
+        <p>
+          Schuit Sharing (<a href="https://sharing.schuit.io">sharing.schuit.io</a>,
+          the &ldquo;Service&rdquo;) is a private, invite-only file-sharing
+          application operated by Sturgeon Technologies (&ldquo;we&rdquo;,
+          &ldquo;us&rdquo;). Access is granted by invitation only. This policy
+          explains what data we collect, why, and how you can have it removed.
+        </p>
+
+        <h2>Information we collect</h2>
+        <ul>
+          <li>
+            <strong>Account identity.</strong> When you sign in, we store your
+            <strong> email address</strong> and, if your sign-in provider supplies
+            it, your <strong>display name</strong>. This is the entirety of the
+            profile data we keep about you.
+          </li>
+          <li>
+            <strong>How you signed in.</strong> You may authenticate with Google,
+            with Facebook, or with an email address and password. Sign-in is
+            handled by <strong>Amazon Cognito</strong>. When you use Facebook
+            Login, we request only the <code>public_profile</code> and
+            <code>email</code> permissions, and we receive only your name and
+            email address from Facebook — nothing else, and we never post to your
+            account.
+          </li>
+          <li>
+            <strong>Files you access or upload.</strong> Files shared through the
+            Service are stored in a private Amazon S3 bucket. We do not inspect
+            file contents; access is limited to the folders an administrator has
+            granted to your account.
+          </li>
+          <li>
+            <strong>Access records.</strong> We keep basic records needed to run
+            the Service, such as your group membership and which shared folders
+            you are permitted to use.
+          </li>
+        </ul>
+        <p class="muted">
+          We do <strong>not</strong> collect advertising identifiers, we do
+          <strong>not</strong> run third-party ad or analytics trackers, and we do
+          <strong>not</strong> sell or rent your personal information to anyone.
+        </p>
+
+        <h2>How we use your information</h2>
+        <ul>
+          <li>To authenticate you and keep the Service invite-only.</li>
+          <li>To determine which shared folders and files you may access.</li>
+          <li>To send account-related email, such as your invitation and one-time verification codes.</li>
+          <li>To operate, secure, and troubleshoot the Service.</li>
+        </ul>
+
+        <h2>How your information is shared</h2>
+        <p>
+          We share personal data only with the infrastructure providers that run
+          the Service on our behalf: <strong>Amazon Web Services</strong> (Cognito,
+          S3, DynamoDB, Lambda, CloudFront; region us-east-1) and your chosen
+          identity provider (<strong>Google</strong> or <strong>Facebook</strong>)
+          at the moment you sign in. We disclose information otherwise only if
+          required by law.
+        </p>
+
+        <h2>Data retention</h2>
+        <p>
+          We retain your account identity and access records for as long as your
+          account remains active. Pending invitations expire automatically. When
+          your account is deleted, the associated identity data is removed as
+          described below.
+        </p>
+
+        <h2 id="data-deletion">Deleting your data</h2>
+        <p>
+          You may request deletion of your account and associated personal data at
+          any time. This also serves as our data-deletion instructions for
+          Facebook Login users.
+        </p>
+        <ul>
+          <li>
+            Email <a href="mailto:riley.schuit@gmail.com?subject=Data%20deletion%20request">riley.schuit@gmail.com</a>
+            from the address associated with your account, or with the name of the
+            account to remove.
+          </li>
+          <li>
+            We will delete your Cognito account and the identity data we hold
+            (email address and display name) within 30 days and confirm by reply.
+          </li>
+          <li>
+            You can also remove the app's access to your Facebook data at any time
+            from <strong>Facebook &rarr; Settings &amp; Privacy &rarr; Settings
+            &rarr; Apps and Websites</strong>.
+          </li>
+        </ul>
+
+        <h2>Children's privacy</h2>
+        <p>
+          The Service is not directed to children under 13 and we do not knowingly
+          collect their personal information.
+        </p>
+
+        <h2>Changes to this policy</h2>
+        <p>
+          We may update this policy from time to time. Material changes will be
+          reflected by the &ldquo;Last updated&rdquo; date above.
+        </p>
+
+        <h2>Contact</h2>
+        <p>
+          Questions about this policy or your data? Email
+          <a href="mailto:riley.schuit@gmail.com">riley.schuit@gmail.com</a>.
+        </p>
+
+        <hr />
+        <a class="back" href="/">&larr; Back to Schuit Sharing</a>
+      </div>
+    </main>
+  </body>
+</html>

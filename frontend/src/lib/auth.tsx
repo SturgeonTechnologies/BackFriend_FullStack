@@ -58,6 +58,7 @@ export interface AuthState {
   idToken: string | null;
   loading: boolean;
   loginWithGoogle: (returnTo?: string) => Promise<void>;
+  loginWithFacebook: (returnTo?: string) => Promise<void>;
   loginWithEmail: (returnTo?: string) => Promise<void>;
   logout: () => void;
   handleCallback: () => Promise<string | null>; // returns returnTo path (if any)
@@ -86,8 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // buttons use the exact same code→token exchange (handleCallback); the only
   // difference is whether we pin `identity_provider`:
   //   - "Google"    → hosted UI bounces straight to Google.
+  //   - "Facebook"  → hosted UI bounces straight to Facebook.
   //   - undefined   → hosted UI shows its own page (email/password form,
-  //                   "Sign up", "Forgot password", and a Google button).
+  //                   "Sign up", "Forgot password", and Google/Facebook buttons).
   const startAuthorize = useCallback(async (identityProvider?: string, returnTo?: string) => {
     const verifier = randomVerifier();
     const challenge = await challengeFromVerifier(verifier);
@@ -111,6 +113,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithGoogle = useCallback(
     (returnTo?: string) => startAuthorize("Google", returnTo),
+    [startAuthorize],
+  );
+
+  const loginWithFacebook = useCallback(
+    (returnTo?: string) => startAuthorize("Facebook", returnTo),
     [startAuthorize],
   );
 
@@ -192,11 +199,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       idToken: tokens?.idToken ?? null,
       loading,
       loginWithGoogle,
+      loginWithFacebook,
       loginWithEmail,
       logout,
       handleCallback,
     }),
-    [claims, tokens, loading, loginWithGoogle, loginWithEmail, logout, handleCallback],
+    [claims, tokens, loading, loginWithGoogle, loginWithFacebook, loginWithEmail, logout, handleCallback],
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

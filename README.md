@@ -14,17 +14,17 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 > Block is on**; the only ways to reach a file are a signed-in browse/download
 > (5-min presigned GET) or an explicit per-file "public" token link.
 
-- Auth: **Cognito** — sign in with **Google** *or* **email + password** (both via
-  the Cognito hosted UI; email/password users self-register through the invite gate
-  and verify their address with a one-time code)
+- Auth: **Cognito** — sign in with **Google**, **Facebook**, *or* **email + password**
+  (all via the Cognito hosted UI; email/password users self-register through the invite
+  gate and verify their address with a one-time code)
 - First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
-- Admins invite other users by email; invitees go to the site and either "Sign in
-  with Google" or "Sign in with email" → "Sign up"
+- Admins invite other users by email; invitees go to the site and "Sign in with
+  Google", "Sign in with Facebook", or "Sign in with email" → "Sign up"
 - Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
 
 ### Features
 
-- **Auth:** Google + email/password (both via the Cognito hosted UI, themed to match the site).
+- **Auth:** Google + Facebook + email/password (all via the Cognito hosted UI, themed to match the site).
 - **Mounts** with per-mount access control (`allowedEmails`; blank = admins-only). **Add/modify** a mount or manage its users from the Admin page (with email autocomplete + auto-invite of anyone granted who isn't invited yet).
 - **Invites/Access** — invite users; the list shows everyone with access (active users + pending invites).
 - **Admin bucket explorer** — browse the raw bucket, **create** a directory, **delete** a directory (type-name + "confirm" guard), and per-file Public / Download / Delete.
@@ -33,9 +33,11 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 - **Profile** page + a user dropdown menu.
 
 > **One email = one sign-in method.** Because the pool uses the email as the
-> username, a given address should use **either** Google **or** a password, not both.
-> Signing up a password account for an email that already signs in with Google (or
-> vice-versa) collides in Cognito. Automatic account-linking is not configured.
+> username, a given address should use **exactly one** of Google, Facebook, or a
+> password — never a mix. Signing in with a second method for an email that
+> already exists under another collides in Cognito (`already found an entry for
+> username`). Automatic account-linking is not configured, so pick one method per
+> invitee.
 - Everything behind a single CloudFront distribution on `sharing.schuit.io`
 
 ## Layout
@@ -78,8 +80,8 @@ schuit-sharing/
   ┌─────────────────┐                       │       │
   │ Cognito User    │◀──OAuth/PKCE (browser)┘       │
   │ Pool (hosted UI)│                               │
-  │ Google + email  │                               │
-  │/password        │                               │
+  │ Google/Facebook │                               │
+  │ + email/pass    │                               │
   └─────────────────┘                               │
                         ┌──────────────┐            │
                         │ DynamoDB     │◀───────────┤
@@ -98,9 +100,12 @@ schuit-sharing/
 - Node 20, npm
 - AWS CLI configured (for the AWS account that owns `schuit.io` in Route 53)
 - A Google Cloud project for OAuth
+- A Meta for Developers app for Facebook Login (https://developers.facebook.com/)
 - Serverless Framework v3 (`npm i -g serverless`)
 
-## 1. Create the Google OAuth client
+## 1. Create the OAuth clients (Google + Facebook)
+
+### Google
 
 1. Go to https://console.cloud.google.com/ → pick (or create) a project.
 2. **APIs & Services → OAuth consent screen**: create one (External, add your email as a test user if you leave it in Testing; publish later).
@@ -113,9 +118,19 @@ schuit-sharing/
      - `https://<cognito-domain>/oauth2/idpresponse`
 4. Save the **Client ID** and **Client secret** for step 2.
 
-## 2. Store Google creds in SSM Parameter Store
+### Facebook
+
+1. Go to https://developers.facebook.com/ → **My Apps → Create App** (use type **Consumer**).
+2. Add the **Facebook Login** product to the app.
+3. **App Settings → Basic**: note the **App ID** and **App Secret** (these are the `client_id` / `client_secret` for step 2). Set a Privacy Policy URL — Facebook requires one before the app can go Live.
+4. **Facebook Login → Settings → Valid OAuth Redirect URIs**: add the Cognito endpoint (same as Google — you'll get the final domain in step 3, so come back and fill this in):
+   - `https://<cognito-domain>/oauth2/idpresponse`
+5. When ready for real invitees, flip the app from **Development** to **Live** (top bar). `public_profile` + `email` are default permissions and need **no App Review**.
+
+## 2. Store OAuth creds in SSM Parameter Store
 
 ```bash
+# --- Google ---
 aws ssm put-parameter \
   --name /schuit-sharing/prod/google/client_id \
   --type String \
@@ -125,9 +140,20 @@ aws ssm put-parameter \
   --name /schuit-sharing/prod/google/client_secret \
   --type SecureString \
   --value '<google-client-secret>'
+
+# --- Facebook (client_id = App ID, client_secret = App Secret) ---
+aws ssm put-parameter \
+  --name /schuit-sharing/prod/facebook/client_id \
+  --type String \
+  --value '<facebook-app-id>'
+
+aws ssm put-parameter \
+  --name /schuit-sharing/prod/facebook/client_secret \
+  --type SecureString \
+  --value '<facebook-app-secret>'
 ```
 
-The live deployment uses stage `prod`. The `dev` stage is reserved for a future personal sandbox / `serverless offline` use; if you populate `/schuit-sharing/dev/google/...` you can deploy a parallel sandbox stack with `--stage dev`.
+The live deployment uses stage `prod`. The `dev` stage is reserved for a future personal sandbox / `serverless offline` use; if you populate `/schuit-sharing/dev/{google,facebook}/...` you can deploy a parallel sandbox stack with `--stage dev`.
 
 ## 3. Deploy the backend
 
@@ -145,7 +171,7 @@ Outputs you'll need:
 - `SharesBucketName` — the bucket the app reads from (default: `schuit-sharing`)
 - `ApiEndpoint` — raw API Gateway URL; you'll need the host portion only
 
-**Now go back to Google Cloud Console** and add the Cognito callback to the authorized redirect URIs:
+**Now go back to both Google Cloud Console and the Facebook app** and add the Cognito callback to their redirect URIs (Google: *Authorized redirect URIs*; Facebook: *Facebook Login → Settings → Valid OAuth Redirect URIs*):
 
 ```
 https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
@@ -375,8 +401,8 @@ In Admin → **Invite a user**:
   and the recipient isn't verified, the form shows a warning + the link
   so you can paste it yourself.
 
-They go to https://sharing.schuit.io and either **Sign in with Google** or
-**Sign in with email → Sign up** (email/password users get a one-time verification
+They go to https://sharing.schuit.io and use **Sign in with Google**, **Sign in
+with Facebook**, or **Sign in with email → Sign up** (email/password users get a one-time verification
 code — sent by Cognito's default email sender, which is *not* subject to the SES
 sandbox, so it reaches any invitee). Either way, the `preSignUp` Lambda trigger lets
 them in based on the invite row in DynamoDB; `postAuth` adds them to any groups and
@@ -399,7 +425,7 @@ npm run dev
 
 Add `http://localhost:5173/auth/callback` to:
 - the Cognito User Pool Client's **Callback URLs** (already included by `serverless.yml`)
-- the Google OAuth client's authorized redirect URIs (optional — only if you want to test the full Google → Cognito → app flow against a dev Cognito domain)
+- the Google OAuth client's and Facebook app's authorized redirect URIs (optional — only if you want to test the full Google/Facebook → Cognito → app flow against a dev Cognito domain)
 
 ## Continuous deployment (GitHub Actions)
 

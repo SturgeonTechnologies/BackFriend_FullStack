@@ -157,6 +157,13 @@ custom:
   googleClientId:    ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/google/client_id}
   googleClientSecret: ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/google/client_secret}
 
+  # Facebook OAuth credentials — same SSM convention as Google above. The
+  # "client_id" is the Facebook App ID and "client_secret" is the App Secret.
+  #   aws ssm put-parameter --region us-east-1 --name /schuit-sharing/${stage}/facebook/client_id     --type String       --value "<facebook-app-id>"
+  #   aws ssm put-parameter --region us-east-1 --name /schuit-sharing/${stage}/facebook/client_secret --type SecureString --value "<facebook-app-secret>"
+  facebookClientId:    ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/facebook/client_id}
+  facebookClientSecret: ${ssm(us-east-1):/schuit-sharing/${self:provider.stage}/facebook/client_secret}
+
   esbuild:
     bundle: true
     minify: true
@@ -354,6 +361,27 @@ resources:
           email_verified: email_verified
           name: name
 
+    FacebookIdentityProvider:
+      Type: AWS::Cognito::UserPoolIdentityProvider
+      Properties:
+        UserPoolId: !Ref UserPool
+        ProviderName: Facebook
+        ProviderType: Facebook
+        ProviderDetails:
+          client_id: ${self:custom.facebookClientId}
+          client_secret: ${self:custom.facebookClientSecret}
+          # Facebook expects a COMMA-separated scope list (Google uses spaces).
+          authorize_scopes: "public_profile,email"
+          # Pin the Graph API version so Facebook can't silently move us onto a
+          # newer/older default. Bump this when validating a newer version.
+          api_version: v21.0
+        # NOTE: no `email_verified` mapping — Facebook does not return that
+        # attribute. The preSignUp trigger sets autoVerifyEmail for all
+        # federated sign-ins, so the address is trusted without it.
+        AttributeMapping:
+          email: email
+          name: name
+
     UserPoolDomain:
       Type: AWS::Cognito::UserPoolDomain
       Properties:
@@ -362,18 +390,22 @@ resources:
 
     UserPoolClient:
       Type: AWS::Cognito::UserPoolClient
-      DependsOn: GoogleIdentityProvider
+      # Both federated providers must exist before the client can list them.
+      DependsOn:
+        - GoogleIdentityProvider
+        - FacebookIdentityProvider
       Properties:
         UserPoolId: !Ref UserPool
         ClientName: ${self:service}-${self:provider.stage}-web
         GenerateSecret: false
         # COGNITO enables the hosted UI's native email/password form (plus the
-        # self-service "Sign up" and "Forgot password" screens). Google stays for
-        # federated sign-in. Both flows funnel through the same OAuth `code` +
-        # PKCE exchange, so the app-side handling is identical.
+        # self-service "Sign up" and "Forgot password" screens). Google and
+        # Facebook stay for federated sign-in. All flows funnel through the same
+        # OAuth `code` + PKCE exchange, so the app-side handling is identical.
         SupportedIdentityProviders:
           - COGNITO
           - Google
+          - Facebook
         AllowedOAuthFlows: [code]
         AllowedOAuthFlowsUserPoolClient: true
         AllowedOAuthScopes: [openid, email, profile]
