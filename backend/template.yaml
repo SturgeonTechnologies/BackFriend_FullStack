@@ -1,0 +1,1042 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  schuit-sharing backend (AWS SAM). 1:1 translation of the Serverless Framework v3
+  serverless.yml. Resource NAMES (stack, tables, user pool, Lambda functions) and
+  stack OUTPUTS are preserved exactly so that:
+    - scripts/wire-cognito-triggers.mjs works unchanged, and
+    - a future prod cutover can `sam deploy` over an IMPORT of the existing
+      Cognito pool + DynamoDB tables without recreating (and wiping) them.
+  See SAM.md for the migration/runbook.
+
+# ---------------------------------------------------------------------------
+# Parameters
+#   Per-stage values that were `custom.*` in serverless.yml. Secrets (the OAuth
+#   client secrets) are NoEcho and are passed at deploy time from SSM by the
+#   deploy wrapper — CFN cannot resolve an `ssm-secure` dynamic reference inside
+#   a Cognito IdP's ProviderDetails (that's gotcha #1 from the assessment).
+# ---------------------------------------------------------------------------
+Parameters:
+  Stage:
+    Type: String
+    Default: samtest
+    Description: Deployment stage; drives all resource names (schuit-sharing-<stage>-*).
+
+  SharesBucket:
+    Type: String
+    Description: Name of the (external, not managed here) S3 bucket that mounts read/write.
+
+  SiteOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Public site origin used when building public share links / redirects.
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173
+    Description: CORS allowed origins for the HTTP API.
+
+  BootstrapAdminEmails:
+    Type: String
+    Default: riley.schuit@gmail.com
+    Description: Comma-separated emails auto-promoted to admins on first sign-in.
+
+  MailFrom:
+    Type: String
+    Default: noreply@schuit.io
+    Description: SES verified From address for invite emails.
+
+  MailRegion:
+    Type: String
+    Default: us-east-1
+    Description: Region of the shared SES identity (schuit.io).
+
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: Google OAuth client id (public).
+
+  GoogleClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Google OAuth client secret (from SSM SecureString, passed at deploy time).
+
+  FacebookClientId:
+    Type: String
+    Default: ""
+    Description: Facebook App id.
+
+  FacebookClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Facebook App secret (from SSM SecureString, passed at deploy time).
+
+  WebCallbackUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173/auth/callback,https://sharing.schuit.io/auth/callback"
+    Description: OAuth callback URLs for the web SPA client.
+
+  WebLogoutUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173/,https://sharing.schuit.io/"
+    Description: OAuth sign-out URLs for the web SPA client.
+
+  MobileCallbackUrls:
+    Type: CommaDelimitedList
+    Default: "sharingpoc://auth/callback"
+    Description: OAuth callback URLs for the mobile (Expo) PKCE client.
+
+  MobileLogoutUrls:
+    Type: CommaDelimitedList
+    Default: "sharingpoc://signout"
+    Description: OAuth sign-out URLs for the mobile (Expo) PKCE client.
+
+Conditions:
+  # Only create the federated IdPs (and list them on the clients) when creds are
+  # supplied. Lets the test stage come up green with just email/password.
+  HasGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
+  HasFacebook: !Not [!Equals [!Ref FacebookClientId, ""]]
+  HasAnyIdp: !Or [!Condition HasGoogle, !Condition HasFacebook]
+
+# ---------------------------------------------------------------------------
+# Globals — shared Function config (was provider.* in serverless.yml)
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    # nodejs24.x: nodejs20.x is deprecated (2026-04-30). Handlers are esbuild-
+    # bundled TS, so bumping the runtime is safe; esbuild Target stays node20.
+    Runtime: nodejs24.x
+    Timeout: 15
+    MemorySize: 256
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        INVITES_TABLE: !Ref InvitesTable
+        MOUNTS_TABLE: !Ref MountsTable
+        PUBLIC_SHARES_TABLE: !Ref PublicSharesTable
+        # USER_POOL_ID intentionally NOT injected (would create a circular dep
+        # via UserPool.LambdaConfig -> trigger Lambdas). See serverless.yml notes.
+        ADMIN_GROUP: admins
+        BOOTSTRAP_ADMIN_EMAILS: !Ref BootstrapAdminEmails
+        SHARES_BUCKET: !Ref SharesBucket
+        SITE_ORIGIN: !Ref SiteOrigin
+        MAIL_FROM: !Ref MailFrom
+        MAIL_REGION: !Ref MailRegion
+
+Resources:
+  # =========================================================================
+  # Shared IAM role (serverless used a single role for all functions; SAM
+  # defaults to per-function roles, so we define it explicitly and reference it
+  # from Globals.Function.Role above).
+  # =========================================================================
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "schuit-sharing-${Stage}-lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: app
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # DynamoDB: invites + mounts + public shares (+ its GSI)
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt InvitesTable.Arn
+                  - !GetAtt MountsTable.Arn
+                  - !GetAtt PublicSharesTable.Arn
+                  - !Sub "${PublicSharesTable.Arn}/index/*"
+              # S3: list the shared bucket
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${SharesBucket}"
+              # S3: object get/put/delete within the shared bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${SharesBucket}/*"
+              # Cognito admin APIs (wildcard userpool ARN — using the pool ARN
+              # would recreate the circular dependency; see serverless.yml).
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminListGroupsForUser
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                Resource:
+                  - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+              # SES: send invite emails (identity owned by the email-infra stack)
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub "arn:aws:ses:${MailRegion}:${AWS::AccountId}:identity/*"
+
+  # =========================================================================
+  # HTTP API (was provider.httpApi). Cognito JWT authorizer + CORS.
+  # =========================================================================
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # StageName omitted -> "$default" (auto-deploy), matching serverless.
+      FailOnWarnings: true
+      CorsConfiguration:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+      Auth:
+        # No DefaultAuthorizer: the /public/{token} route is intentionally open.
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              audience:
+                - !Ref UserPoolClient
+                - !Ref UserPoolClientMobile
+
+  # =========================================================================
+  # Cognito trigger Lambdas (wired to the pool POST-deploy by
+  # scripts/wire-cognito-triggers.mjs — names must be exactly
+  # schuit-sharing-<stage>-{preSignUp,postAuth,preTokenGen}).
+  # =========================================================================
+  PreSignUp:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-preSignUp"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: preSignUp.handler
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/triggers/preSignUp.ts
+
+  PostAuth:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-postAuth"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: postAuth.handler
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/triggers/postAuth.ts
+
+  PreTokenGen:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-preTokenGen"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: preTokenGen.handler
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/triggers/preTokenGen.ts
+
+  PreSignUpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreSignUp.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  PostAuthInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PostAuth.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  PreTokenGenInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreTokenGen.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  # =========================================================================
+  # Admin: invites
+  # =========================================================================
+  CreateInvite:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-createInvite"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: createInvite.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /admin/invites
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/createInvite.ts
+
+  ListInvites:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-listInvites"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: listInvites.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /admin/invites
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/listInvites.ts
+
+  RevokeInvite:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-revokeInvite"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: revokeInvite.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /admin/invites/{email}
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/revokeInvite.ts
+
+  ListAccess:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-listAccess"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: listAccess.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /admin/access
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/listAccess.ts
+
+  # =========================================================================
+  # Admin: mounts
+  # =========================================================================
+  CreateMount:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-createMount"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: createMount.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /admin/mounts
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/createMount.ts
+
+  UpdateMount:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-updateMount"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: updateMount.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: PUT
+            Path: /admin/mounts/{mountPath}
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/updateMount.ts
+
+  DeleteMount:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-deleteMount"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: deleteMount.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /admin/mounts/{mountPath}
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/deleteMount.ts
+
+  # =========================================================================
+  # Admin: raw-bucket explorer
+  # =========================================================================
+  ExploreBucket:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-exploreBucket"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: exploreBucket.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /admin/explore
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/exploreBucket.ts
+
+  CreateFolder:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-createFolder"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: createFolder.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /admin/explore/folder
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/createFolder.ts
+
+  DeleteDirectory:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-deleteDirectory"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: deleteDirectory.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /admin/explore/directory
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/deleteDirectory.ts
+
+  ExploreDownloadUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-exploreDownloadUrl"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: exploreDownloadUrl.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /admin/explore/download-url
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/exploreDownloadUrl.ts
+
+  ExploreDeleteFile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-exploreDeleteFile"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: exploreDeleteFile.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /admin/explore/file
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/exploreDeleteFile.ts
+
+  ExplorePublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-explorePublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: explorePublic.handler
+      Events:
+        Post:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /admin/explore/public
+            Auth: { Authorizer: CognitoJwt }
+        Delete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /admin/explore/public
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/explorePublic.ts
+
+  # =========================================================================
+  # Admin: per-file public sharing (mount-relative)
+  # =========================================================================
+  SetPublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-setPublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: setPublic.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /browse/{mountPath}/public
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/setPublic.ts
+
+  UnsetPublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-unsetPublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: unsetPublic.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /browse/{mountPath}/public
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/admin/unsetPublic.ts
+
+  # =========================================================================
+  # Public: resolve a share token (NO authorizer)
+  # =========================================================================
+  ResolvePublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-resolvePublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: resolvePublic.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /public/{token}
+            # No Auth block -> unauthenticated (public share resolution).
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/public/resolvePublic.ts
+
+  # =========================================================================
+  # Authenticated: directory browser
+  # =========================================================================
+  ListMounts:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-listMounts"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: listMounts.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /mounts
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/listMounts.ts
+
+  Search:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-search"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: search.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /search
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/search.ts
+
+  BrowseList:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-browseList"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: browseList.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /browse/{mountPath}
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/browseList.ts
+
+  BrowseDownloadUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-browseDownloadUrl"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: browseDownloadUrl.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /browse/{mountPath}/download-url
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/browseDownloadUrl.ts
+
+  UploadUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-uploadUrl"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: uploadUrl.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /browse/{mountPath}/upload-url
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/uploadUrl.ts
+
+  DeleteFile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "schuit-sharing-${Stage}-deleteFile"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: deleteFile.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /browse/{mountPath}/file
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/deleteFile.ts
+
+  # =========================================================================
+  # Cognito (raw CloudFormation, copied ~1:1 from serverless.yml)
+  # =========================================================================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    # NOTE: LambdaConfig intentionally absent — wired post-deploy by
+    # scripts/wire-cognito-triggers.mjs to avoid the CFN circular dependency.
+    Properties:
+      UserPoolName: !Sub "schuit-sharing-${Stage}"
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      MfaConfiguration: "OFF"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - { Name: email, AttributeDataType: String, Required: true, Mutable: true }
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogle
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: "profile email openid"
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+        name: name
+
+  FacebookIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasFacebook
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Facebook
+      ProviderType: Facebook
+      ProviderDetails:
+        client_id: !Ref FacebookClientId
+        client_secret: !Ref FacebookClientSecret
+        authorize_scopes: "public_profile,email"
+        api_version: v21.0
+      AttributeMapping:
+        email: email
+        name: name
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Sub "schuit-sharing-${Stage}-${AWS::AccountId}"
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    # Both federated providers must exist before the client can list them.
+    # DependsOn is conditional-safe: CFN skips deps on non-created resources.
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "schuit-sharing-${Stage}-web"
+      GenerateSecret: false
+      SupportedIdentityProviders: !If
+        - HasAnyIdp
+        - !Split
+          - ","
+          - !Sub
+            - "COGNITO${g}${f}"
+            - g: !If [HasGoogle, ",Google", ""]
+              f: !If [HasFacebook, ",Facebook", ""]
+        - [COGNITO]
+      AllowedOAuthFlows: [code]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: !Ref WebCallbackUrls
+      LogoutURLs: !Ref WebLogoutUrls
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # Mobile (Expo) PKCE client — public, custom-scheme redirect. Added for the
+  # mobile POC; same OAuth code+PKCE flow as web.
+  UserPoolClientMobile:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "schuit-sharing-${Stage}-mobile"
+      GenerateSecret: false
+      SupportedIdentityProviders: !If
+        - HasAnyIdp
+        - !Split
+          - ","
+          - !Sub
+            - "COGNITO${g}${f}"
+            - g: !If [HasGoogle, ",Google", ""]
+              f: !If [HasFacebook, ",Facebook", ""]
+        - [COGNITO]
+      AllowedOAuthFlows: [code]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: !Ref MobileCallbackUrls
+      LogoutURLs: !Ref MobileLogoutUrls
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref UserPool
+      Description: Administrators who can send invites and manage mounts
+      Precedence: 1
+
+  # =========================================================================
+  # DynamoDB (copied ~1:1 from serverless.yml)
+  # =========================================================================
+  InvitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "schuit-sharing-${Stage}-invites"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: email, AttributeType: S }
+      KeySchema:
+        - { AttributeName: email, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  MountsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "schuit-sharing-${Stage}-mounts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: mountPath, AttributeType: S }
+      KeySchema:
+        - { AttributeName: mountPath, KeyType: HASH }
+
+  PublicSharesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "schuit-sharing-${Stage}-public-shares"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: mountPath, AttributeType: S }
+        - { AttributeName: path, AttributeType: S }
+        - { AttributeName: token, AttributeType: S }
+      KeySchema:
+        - { AttributeName: mountPath, KeyType: HASH }
+        - { AttributeName: path, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: TokenIndex
+          KeySchema:
+            - { AttributeName: token, KeyType: HASH }
+          Projection:
+            ProjectionType: ALL
+
+# ---------------------------------------------------------------------------
+# Outputs — same keys as serverless.yml (wire-cognito-triggers.mjs reads
+# UserPoolId + UserPoolClientId; the SPA/mobile read the rest).
+# ---------------------------------------------------------------------------
+Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  UserPoolClientMobileId:
+    Value: !Ref UserPoolClientMobile
+  CognitoDomain:
+    Value: !Sub "https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+  ApiEndpoint:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  HttpApiId:
+    Value: !Ref HttpApi
