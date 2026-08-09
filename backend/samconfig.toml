@@ -50,7 +50,7 @@ parallel = true
 
 [prod.deploy.parameters]
 capabilities = "CAPABILITY_NAMED_IAM"
-resolve_s3 = true
+s3_bucket = "schuit-sharing-sam-artifacts-587449585882"
 confirm_changeset = true
 fail_on_empty_changeset = false
 parameter_overrides = "Stage=prod FunctionNamePrefix=schuit-sharing-prod-sam SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io ExistingUserPoolId=us-east-1_8Zf0FwRVl ExistingWebClientId=mai2ubk9ca9apj335bth8os2g"
