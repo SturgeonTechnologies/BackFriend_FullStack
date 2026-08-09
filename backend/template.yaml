@@ -88,12 +88,12 @@ Parameters:
 
   MobileCallbackUrls:
     Type: CommaDelimitedList
-    Default: "sharingpoc://auth/callback"
-    Description: OAuth callback URLs for the mobile (Expo) PKCE client.
+    Default: "backfriend://auth/callback"
+    Description: OAuth callback URLs for the mobile (Expo) PKCE client (working scheme; app name TBD).
 
   MobileLogoutUrls:
     Type: CommaDelimitedList
-    Default: "sharingpoc://signout"
+    Default: "backfriend://signout"
     Description: OAuth sign-out URLs for the mobile (Expo) PKCE client.
 
   # ── Adopt mode (prod cutover) ─────────────────────────────────────────────
