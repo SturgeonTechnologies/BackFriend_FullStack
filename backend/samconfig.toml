@@ -1,0 +1,49 @@
+# SAM CLI configuration. Secrets (OAuth client secrets) are intentionally NOT
+# stored here — they are read from SSM SecureString and passed at deploy time by
+# scripts/sam-deploy.mjs. See SAM.md.
+#
+# Region is us-east-1 for every stage: the SES identity, the Google/Facebook SSM
+# params, and the wire-cognito-triggers.mjs default region are all us-east-1.
+version = 0.1
+
+# ===========================================================================
+# samtest — isolated throwaway stage (its own fresh Cognito pool + tables).
+# Comes up with email/password only (no OAuth creds passed -> IdPs skipped).
+# Safe to deploy/delete freely; touches nothing prod.
+# ===========================================================================
+[samtest.global.parameters]
+stack_name = "schuit-sharing-samtest"
+region = "us-east-1"
+
+[samtest.build.parameters]
+cached = true
+parallel = true
+
+[samtest.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+s3_bucket = "schuit-sharing-sam-artifacts-587449585882"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = "Stage=samtest SharesBucket=schuit-sharing-samtest SiteOrigin=http://localhost:5173"
+
+# ===========================================================================
+# prod — the LIVE environment (sharing.schuit.io). DO NOT `sam deploy` this
+# blindly: a plain deploy would try to CREATE a UserPool + DynamoDB tables that
+# already exist and fail (or, worse, replace them). The prod cutover is done via
+# CloudFormation RESOURCE IMPORT of the existing pool + tables. See SAM.md
+# "Prod cutover". OAuth secrets are injected by scripts/sam-deploy.mjs, not here.
+# ===========================================================================
+[prod.global.parameters]
+stack_name = "schuit-sharing-prod"
+region = "us-east-1"
+
+[prod.build.parameters]
+cached = true
+parallel = true
+
+[prod.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+resolve_s3 = true
+confirm_changeset = true
+fail_on_empty_changeset = false
+parameter_overrides = "Stage=prod SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io"
