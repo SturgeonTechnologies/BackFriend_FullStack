@@ -299,6 +299,10 @@ resources:
     # ---------- Cognito ----------
     UserPool:
       Type: AWS::Cognito::UserPool
+      # Retain on stack delete/replace so the SAM cutover can orphan-and-adopt
+      # this pool (with all its users) instead of destroying it. See SAM.md.
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       # NOTE: LambdaConfig is intentionally absent. Putting it here makes
       # UserPool depend on the trigger Lambda functions, which depend on
       # IamRoleLambdaExecution, which (combined with the HttpApi authorizer
@@ -348,6 +352,8 @@ resources:
 
     GoogleIdentityProvider:
       Type: AWS::Cognito::UserPoolIdentityProvider
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         UserPoolId: !Ref UserPool
         ProviderName: Google
@@ -363,6 +369,8 @@ resources:
 
     FacebookIdentityProvider:
       Type: AWS::Cognito::UserPoolIdentityProvider
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         UserPoolId: !Ref UserPool
         ProviderName: Facebook
@@ -384,12 +392,16 @@ resources:
 
     UserPoolDomain:
       Type: AWS::Cognito::UserPoolDomain
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         UserPoolId: !Ref UserPool
         Domain: ${self:custom.cognitoDomainPrefix}
 
     UserPoolClient:
       Type: AWS::Cognito::UserPoolClient
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       # Both federated providers must exist before the client can list them.
       DependsOn:
         - GoogleIdentityProvider
@@ -421,6 +433,8 @@ resources:
 
     AdminsGroup:
       Type: AWS::Cognito::UserPoolGroup
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         GroupName: admins
         UserPoolId: !Ref UserPool
@@ -433,6 +447,8 @@ resources:
     # ---------- DynamoDB ----------
     InvitesTable:
       Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         TableName: ${self:service}-${self:provider.stage}-invites
         BillingMode: PAY_PER_REQUEST
@@ -446,6 +462,8 @@ resources:
 
     MountsTable:
       Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         TableName: ${self:service}-${self:provider.stage}-mounts
         BillingMode: PAY_PER_REQUEST
@@ -458,6 +476,8 @@ resources:
     # prefix). The random `token` in the public URL is looked up via TokenIndex.
     PublicSharesTable:
       Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         TableName: ${self:service}-${self:provider.stage}-public-shares
         BillingMode: PAY_PER_REQUEST
