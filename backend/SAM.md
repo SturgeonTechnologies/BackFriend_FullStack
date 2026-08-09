@@ -8,8 +8,8 @@ Both stacks describe the *same* AWS resources; the SAM template
 
 - [`scripts/wire-cognito-triggers.mjs`](./scripts/wire-cognito-triggers.mjs) runs
   unchanged against either stack, and
-- the live prod stack can be adopted by SAM via **resource import** (below)
-  instead of a destructive recreate.
+- the live prod pool + tables can be **adopted** by a SAM compute stack (see
+  *Prod cutover*) instead of being recreated or migrated.
 
 Both toolchains are kept in the repo during the transition. `serverless.yml`
 remains the source of truth for **prod** until the cutover is done.
@@ -63,6 +63,21 @@ dependency. The pool is created without triggers; the script wires them after.
 All stages deploy to **us-east-1** (the SES identity, the OAuth-secret SSM
 params, and the wire-triggers default region are all us-east-1).
 
+### Create mode vs adopt mode
+
+The template runs in one of two modes, chosen by the `ExistingUserPoolId` param:
+
+- **Create mode** (default; `ExistingUserPoolId` blank) — creates the full **data
+  plane** (Cognito pool, web client, IdPs, domain, admins group, 3 DynamoDB
+  tables) plus the compute. Used by `samtest` and by forkers standing up a fresh
+  environment.
+- **Adopt mode** (`ExistingUserPoolId` set) — creates only the **compute plane**
+  (25 Lambdas, HTTP API, IAM role, mobile client) and **references** an existing
+  pool + tables by id/name. Nothing stateful is created or touched. This is how
+  prod moves to SAM. `FunctionNamePrefix` must be set to avoid colliding with the
+  live Serverless function names; `MobileIdentityProviders` lists the IdPs the
+  adopted pool already has.
+
 ## Deploy to the test stage
 
 ```bash
@@ -109,22 +124,42 @@ sam deploy --config-env <stage> \
 
 ## Prod cutover (NOT done yet — separate, deliberate step)
 
-The live pool holds real users, mounts, and invites. A plain `sam deploy --config-env prod`
-would try to **create** a UserPool + DynamoDB tables that already exist and fail
-(or replace and wipe them). The safe path is **CloudFormation resource import**:
+Approach: a **parallel SAM compute stack** (`schuit-sharing-prod-sam`, adopt mode)
+runs alongside the live Serverless stack referencing the same pool + tables; the
+switch is a **single CloudFront origin flip**. No CloudFormation import — the pool
++ tables are **retained** on the Serverless stack and orphaned when it's removed,
+then referenced by the SAM stack (exactly how the S3 bucket + SES identity are
+already handled). Every step is reversible. Adopt mode is proven end-to-end on
+throwaway resources (a compute stack adopting the samtest pool: authed reads work;
+deleting it leaves the pool/tables/objects intact).
 
-1. Deploy an empty-ish SAM stack, then `sam deploy`/`aws cloudformation create-change-set
-   --change-set-type IMPORT` to import the existing prod Cognito pool + the 3
-   DynamoDB tables (matched by their real names, which this template already
-   reproduces) into the SAM-managed stack.
-2. Set each imported resource's `DeletionPolicy: Retain` first so a mistake can't
-   delete user data.
-3. Re-point `sharing.schuit.io`'s `/api` if the HTTP API id changes (same
-   mechanic as the earlier rom-hub cutover), or keep the SF API until verified.
-4. Run `wire-cognito-triggers.mjs` with `STAGE=prod`.
-5. Verify, then retire the Serverless Framework stack.
+**Live facts:** pool `us-east-1_8Zf0FwRVl`, web client `mai2ubk9ca9apj335bth8os2g`,
+current HttpApi `g35h6wblu7`, front-door CloudFront stack `rom-hub-frontend`
+(param `ApiGatewayDomain` = the API origin — the thing we flip).
 
-Until then, prod continues to be deployed with `serverless deploy --stage prod`.
+1. **Protect** — add `DeletionPolicy: Retain` + `UpdateReplacePolicy: Retain` to the
+   pool, web client, both IdPs, domain, admins group, and 3 tables in
+   `serverless.yml`; `serverless deploy --stage prod`. (Metadata only — no resource
+   changes.) *This is already staged in `serverless.yml`.*
+2. **Deploy the parallel SAM stack** — read the OAuth params from SSM and
+   `sam build --config-env prod && sam deploy --config-env prod` (adopt params live
+   in `samconfig.toml`; pass the 4 OAuth params + secrets on the CLI). Creates a new
+   HttpApi + `schuit-sharing-prod-sam-*` Lambdas pointed at the existing pool/tables.
+3. **Test** the new API URL directly against real data (401 unauth; authed
+   `/mounts` + `/browse` with a real bearer) before any switch.
+4. **Cutover window** — (a) wire triggers to the SAM Lambdas:
+   `STACK_NAME=schuit-sharing-prod-sam FUNCTION_PREFIX=schuit-sharing-prod-sam STAGE=prod AWS_REGION=us-east-1 node scripts/wire-cognito-triggers.mjs`;
+   (b) update `rom-hub-frontend`'s `ApiGatewayDomain` to the new API host, redeploy,
+   invalidate `/api/*`.
+5. **Verify** live on sharing.schuit.io (sign-in, browse, download, public link,
+   admin actions).
+6. **Soak 24–72h, then** `serverless remove --stage prod` — retain policies keep the
+   pool + tables; only the SF Lambdas/API/role are removed.
+
+**Rollback:** flip `ApiGatewayDomain` back to `g35h6wblu7.execute-api.us-east-1.amazonaws.com`
+and re-wire triggers with `FUNCTION_PREFIX=schuit-sharing-prod STACK_NAME=schuit-sharing-prod`.
+
+Until cutover, prod continues to be deployed with `serverless deploy --stage prod`.
 
 ## Mobile client
 

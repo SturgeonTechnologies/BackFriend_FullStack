@@ -1,13 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  schuit-sharing backend (AWS SAM). 1:1 translation of the Serverless Framework v3
-  serverless.yml. Resource NAMES (stack, tables, user pool, Lambda functions) and
-  stack OUTPUTS are preserved exactly so that:
-    - scripts/wire-cognito-triggers.mjs works unchanged, and
-    - a future prod cutover can `sam deploy` over an IMPORT of the existing
-      Cognito pool + DynamoDB tables without recreating (and wiping) them.
-  See SAM.md for the migration/runbook.
+  schuit-sharing backend (AWS SAM). Faithful translation of the Serverless
+  Framework v3 serverless.yml. Resource NAMES (tables, user pool, Lambda
+  functions) and stack OUTPUTS are preserved exactly.
+
+  Two modes (see the ExistingUserPoolId parameter):
+    - CREATE (default): creates the full data plane — used by samtest and forkers.
+    - ADOPT (prod cutover): references an existing Cognito pool + DynamoDB tables
+      by id/name instead of creating them, so prod can move to SAM without
+      touching live users/data. The old pool/tables are retained + orphaned from
+      the Serverless stack rather than imported. See SAM.md "Prod cutover".
 
 # ---------------------------------------------------------------------------
 # Parameters
@@ -93,12 +96,49 @@ Parameters:
     Default: "sharingpoc://signout"
     Description: OAuth sign-out URLs for the mobile (Expo) PKCE client.
 
+  # ── Adopt mode (prod cutover) ─────────────────────────────────────────────
+  # When ExistingUserPoolId is non-empty, the stack does NOT create the data
+  # plane (pool, web client, IdPs, domain, admins group, tables); it references
+  # the existing ones instead. Used to cut prod over to SAM without touching the
+  # live pool/tables. Leave blank (default) for a fresh/create deploy (samtest,
+  # forkers). See SAM.md.
+  ExistingUserPoolId:
+    Type: String
+    Default: ""
+    Description: Adopt mode — id of an existing Cognito user pool to reference. Blank = create one.
+
+  ExistingWebClientId:
+    Type: String
+    Default: ""
+    Description: Adopt mode — id of the existing web app client (goes in the JWT authorizer audience).
+
+  MobileIdentityProviders:
+    Type: CommaDelimitedList
+    Default: "COGNITO,Google,Facebook"
+    Description: >
+      Adopt mode only — the identity providers the ADOPTED pool already has, applied
+      to the mobile client (the prod pool has all three). Set to just "COGNITO" if
+      adopting a pool without federated IdPs. Ignored in create mode.
+
+  FunctionNamePrefix:
+    Type: String
+    Default: schuit-sharing
+    Description: >
+      Prefix for Lambda function + role names (set per-env in samconfig.toml:
+      "schuit-sharing-samtest", "schuit-sharing-prod-sam"). In adopt mode this MUST
+      differ from the still-live Serverless stack's names (schuit-sharing-prod-*).
+
 Conditions:
+  # Create the data plane (pool, web client, IdPs, domain, group, tables) unless
+  # adopting an existing one (prod cutover). See the ExistingUserPoolId param.
+  CreateDataPlane: !Equals [!Ref ExistingUserPoolId, ""]
   # Only create the federated IdPs (and list them on the clients) when creds are
-  # supplied. Lets the test stage come up green with just email/password.
+  # supplied AND we're creating the data plane. Lets the test stage come up green
+  # with just email/password; in adopt mode the IdPs already exist on the pool.
   HasGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
   HasFacebook: !Not [!Equals [!Ref FacebookClientId, ""]]
-  HasAnyIdp: !Or [!Condition HasGoogle, !Condition HasFacebook]
+  CreateGoogle: !And [!Condition CreateDataPlane, !Condition HasGoogle]
+  CreateFacebook: !And [!Condition CreateDataPlane, !Condition HasFacebook]
 
 # ---------------------------------------------------------------------------
 # Globals — shared Function config (was provider.* in serverless.yml)
@@ -113,9 +153,11 @@ Globals:
     Environment:
       Variables:
         STAGE: !Ref Stage
-        INVITES_TABLE: !Ref InvitesTable
-        MOUNTS_TABLE: !Ref MountsTable
-        PUBLIC_SHARES_TABLE: !Ref PublicSharesTable
+        # In adopt mode the tables aren't created here; reference them by their
+        # (stage-derived) real names, which this template reproduces exactly.
+        INVITES_TABLE: !If [CreateDataPlane, !Ref InvitesTable, !Sub "schuit-sharing-${Stage}-invites"]
+        MOUNTS_TABLE: !If [CreateDataPlane, !Ref MountsTable, !Sub "schuit-sharing-${Stage}-mounts"]
+        PUBLIC_SHARES_TABLE: !If [CreateDataPlane, !Ref PublicSharesTable, !Sub "schuit-sharing-${Stage}-public-shares"]
         # USER_POOL_ID intentionally NOT injected (would create a circular dep
         # via UserPool.LambdaConfig -> trigger Lambdas). See serverless.yml notes.
         ADMIN_GROUP: admins
@@ -134,7 +176,7 @@ Resources:
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "schuit-sharing-${Stage}-lambda"
+      RoleName: !Sub "${FunctionNamePrefix}-lambda"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -157,11 +199,18 @@ Resources:
                   - dynamodb:DeleteItem
                   - dynamodb:Query
                   - dynamodb:Scan
-                Resource:
-                  - !GetAtt InvitesTable.Arn
-                  - !GetAtt MountsTable.Arn
-                  - !GetAtt PublicSharesTable.Arn
-                  - !Sub "${PublicSharesTable.Arn}/index/*"
+                # Adopt mode: build the ARNs from the (stage-derived) real table
+                # names since the table resources aren't created in this stack.
+                Resource: !If
+                  - CreateDataPlane
+                  - - !GetAtt InvitesTable.Arn
+                    - !GetAtt MountsTable.Arn
+                    - !GetAtt PublicSharesTable.Arn
+                    - !Sub "${PublicSharesTable.Arn}/index/*"
+                  - - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-invites"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-mounts"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-public-shares"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-public-shares/index/*"
               # S3: list the shared bucket
               - Effect: Allow
                 Action:
@@ -221,9 +270,13 @@ Resources:
           CognitoJwt:
             IdentitySource: "$request.header.Authorization"
             JwtConfiguration:
-              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              issuer: !If
+                - CreateDataPlane
+                - !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+                - !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${ExistingUserPoolId}"
               audience:
-                - !Ref UserPoolClient
+                # Existing web client (adopt) or the created one, plus the mobile client.
+                - !If [CreateDataPlane, !Ref UserPoolClient, !Ref ExistingWebClientId]
                 - !Ref UserPoolClientMobile
 
   # =========================================================================
@@ -234,7 +287,7 @@ Resources:
   PreSignUp:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-preSignUp"
+      FunctionName: !Sub "${FunctionNamePrefix}-preSignUp"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: preSignUp.handler
@@ -250,7 +303,7 @@ Resources:
   PostAuth:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-postAuth"
+      FunctionName: !Sub "${FunctionNamePrefix}-postAuth"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: postAuth.handler
@@ -266,7 +319,7 @@ Resources:
   PreTokenGen:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-preTokenGen"
+      FunctionName: !Sub "${FunctionNamePrefix}-preTokenGen"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: preTokenGen.handler
@@ -285,7 +338,11 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt PreSignUp.Arn
       Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt UserPool.Arn
+      # Adopt mode: the existing pool (by id) must be allowed to invoke the trigger.
+      SourceArn: !If
+        - CreateDataPlane
+        - !GetAtt UserPool.Arn
+        - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${ExistingUserPoolId}"
 
   PostAuthInvokePermission:
     Type: AWS::Lambda::Permission
@@ -293,7 +350,11 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt PostAuth.Arn
       Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt UserPool.Arn
+      # Adopt mode: the existing pool (by id) must be allowed to invoke the trigger.
+      SourceArn: !If
+        - CreateDataPlane
+        - !GetAtt UserPool.Arn
+        - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${ExistingUserPoolId}"
 
   PreTokenGenInvokePermission:
     Type: AWS::Lambda::Permission
@@ -301,7 +362,11 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt PreTokenGen.Arn
       Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt UserPool.Arn
+      # Adopt mode: the existing pool (by id) must be allowed to invoke the trigger.
+      SourceArn: !If
+        - CreateDataPlane
+        - !GetAtt UserPool.Arn
+        - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${ExistingUserPoolId}"
 
   # =========================================================================
   # Admin: invites
@@ -309,7 +374,7 @@ Resources:
   CreateInvite:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-createInvite"
+      FunctionName: !Sub "${FunctionNamePrefix}-createInvite"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: createInvite.handler
@@ -333,7 +398,7 @@ Resources:
   ListInvites:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-listInvites"
+      FunctionName: !Sub "${FunctionNamePrefix}-listInvites"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: listInvites.handler
@@ -357,7 +422,7 @@ Resources:
   RevokeInvite:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-revokeInvite"
+      FunctionName: !Sub "${FunctionNamePrefix}-revokeInvite"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: revokeInvite.handler
@@ -381,7 +446,7 @@ Resources:
   ListAccess:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-listAccess"
+      FunctionName: !Sub "${FunctionNamePrefix}-listAccess"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: listAccess.handler
@@ -408,7 +473,7 @@ Resources:
   CreateMount:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-createMount"
+      FunctionName: !Sub "${FunctionNamePrefix}-createMount"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: createMount.handler
@@ -432,7 +497,7 @@ Resources:
   UpdateMount:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-updateMount"
+      FunctionName: !Sub "${FunctionNamePrefix}-updateMount"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: updateMount.handler
@@ -456,7 +521,7 @@ Resources:
   DeleteMount:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-deleteMount"
+      FunctionName: !Sub "${FunctionNamePrefix}-deleteMount"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: deleteMount.handler
@@ -483,7 +548,7 @@ Resources:
   ExploreBucket:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-exploreBucket"
+      FunctionName: !Sub "${FunctionNamePrefix}-exploreBucket"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: exploreBucket.handler
@@ -507,7 +572,7 @@ Resources:
   CreateFolder:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-createFolder"
+      FunctionName: !Sub "${FunctionNamePrefix}-createFolder"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: createFolder.handler
@@ -531,7 +596,7 @@ Resources:
   DeleteDirectory:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-deleteDirectory"
+      FunctionName: !Sub "${FunctionNamePrefix}-deleteDirectory"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: deleteDirectory.handler
@@ -555,7 +620,7 @@ Resources:
   ExploreDownloadUrl:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-exploreDownloadUrl"
+      FunctionName: !Sub "${FunctionNamePrefix}-exploreDownloadUrl"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: exploreDownloadUrl.handler
@@ -579,7 +644,7 @@ Resources:
   ExploreDeleteFile:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-exploreDeleteFile"
+      FunctionName: !Sub "${FunctionNamePrefix}-exploreDeleteFile"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: exploreDeleteFile.handler
@@ -603,7 +668,7 @@ Resources:
   ExplorePublic:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-explorePublic"
+      FunctionName: !Sub "${FunctionNamePrefix}-explorePublic"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: explorePublic.handler
@@ -637,7 +702,7 @@ Resources:
   SetPublic:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-setPublic"
+      FunctionName: !Sub "${FunctionNamePrefix}-setPublic"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: setPublic.handler
@@ -661,7 +726,7 @@ Resources:
   UnsetPublic:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-unsetPublic"
+      FunctionName: !Sub "${FunctionNamePrefix}-unsetPublic"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: unsetPublic.handler
@@ -688,7 +753,7 @@ Resources:
   ResolvePublic:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-resolvePublic"
+      FunctionName: !Sub "${FunctionNamePrefix}-resolvePublic"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: resolvePublic.handler
@@ -715,7 +780,7 @@ Resources:
   ListMounts:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-listMounts"
+      FunctionName: !Sub "${FunctionNamePrefix}-listMounts"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: listMounts.handler
@@ -739,7 +804,7 @@ Resources:
   Search:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-search"
+      FunctionName: !Sub "${FunctionNamePrefix}-search"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: search.handler
@@ -763,7 +828,7 @@ Resources:
   BrowseList:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-browseList"
+      FunctionName: !Sub "${FunctionNamePrefix}-browseList"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: browseList.handler
@@ -787,7 +852,7 @@ Resources:
   BrowseDownloadUrl:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-browseDownloadUrl"
+      FunctionName: !Sub "${FunctionNamePrefix}-browseDownloadUrl"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: browseDownloadUrl.handler
@@ -811,7 +876,7 @@ Resources:
   UploadUrl:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-uploadUrl"
+      FunctionName: !Sub "${FunctionNamePrefix}-uploadUrl"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: uploadUrl.handler
@@ -835,7 +900,7 @@ Resources:
   DeleteFile:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "schuit-sharing-${Stage}-deleteFile"
+      FunctionName: !Sub "${FunctionNamePrefix}-deleteFile"
       CodeUri: .
       Role: !GetAtt LambdaRole.Arn
       Handler: deleteFile.handler
@@ -861,6 +926,7 @@ Resources:
   # =========================================================================
   UserPool:
     Type: AWS::Cognito::UserPool
+    Condition: CreateDataPlane
     # NOTE: LambdaConfig intentionally absent — wired post-deploy by
     # scripts/wire-cognito-triggers.mjs to avoid the CFN circular dependency.
     Properties:
@@ -882,7 +948,7 @@ Resources:
 
   GoogleIdentityProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
-    Condition: HasGoogle
+    Condition: CreateGoogle
     Properties:
       UserPoolId: !Ref UserPool
       ProviderName: Google
@@ -898,7 +964,7 @@ Resources:
 
   FacebookIdentityProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
-    Condition: HasFacebook
+    Condition: CreateFacebook
     Properties:
       UserPoolId: !Ref UserPool
       ProviderName: Facebook
@@ -914,27 +980,30 @@ Resources:
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
+    Condition: CreateDataPlane
     Properties:
       UserPoolId: !Ref UserPool
       Domain: !Sub "schuit-sharing-${Stage}-${AWS::AccountId}"
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
-    # Both federated providers must exist before the client can list them.
-    # DependsOn is conditional-safe: CFN skips deps on non-created resources.
+    Condition: CreateDataPlane
     Properties:
       UserPoolId: !Ref UserPool
       ClientName: !Sub "schuit-sharing-${Stage}-web"
       GenerateSecret: false
+      # !Ref to the IdP resources gives lint-clean conditional membership AND the
+      # implicit create-ordering dependency (client after its IdPs).
       SupportedIdentityProviders: !If
-        - HasAnyIdp
-        - !Split
-          - ","
-          - !Sub
-            - "COGNITO${g}${f}"
-            - g: !If [HasGoogle, ",Google", ""]
-              f: !If [HasFacebook, ",Facebook", ""]
-        - [COGNITO]
+        - CreateGoogle
+        - !If
+          - CreateFacebook
+          - [COGNITO, !Ref GoogleIdentityProvider, !Ref FacebookIdentityProvider]
+          - [COGNITO, !Ref GoogleIdentityProvider]
+        - !If
+          - CreateFacebook
+          - [COGNITO, !Ref FacebookIdentityProvider]
+          - [COGNITO]
       AllowedOAuthFlows: [code]
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthScopes: [openid, email, profile]
@@ -945,22 +1014,29 @@ Resources:
         - ALLOW_REFRESH_TOKEN_AUTH
 
   # Mobile (Expo) PKCE client — public, custom-scheme redirect. Added for the
-  # mobile POC; same OAuth code+PKCE flow as web.
+  # mobile POC; same OAuth code+PKCE flow as web. Always created — attaches to the
+  # created pool (create mode) or the adopted existing pool (adopt mode).
   UserPoolClientMobile:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      UserPoolId: !Ref UserPool
+      UserPoolId: !If [CreateDataPlane, !Ref UserPool, !Ref ExistingUserPoolId]
       ClientName: !Sub "schuit-sharing-${Stage}-mobile"
       GenerateSecret: false
       SupportedIdentityProviders: !If
-        - HasAnyIdp
-        - !Split
-          - ","
-          - !Sub
-            - "COGNITO${g}${f}"
-            - g: !If [HasGoogle, ",Google", ""]
-              f: !If [HasFacebook, ",Facebook", ""]
-        - [COGNITO]
+        - CreateDataPlane
+        # Create mode: mirror the web client (!Ref IdPs for ordering).
+        - !If
+          - CreateGoogle
+          - !If
+            - CreateFacebook
+            - [COGNITO, !Ref GoogleIdentityProvider, !Ref FacebookIdentityProvider]
+            - [COGNITO, !Ref GoogleIdentityProvider]
+          - !If
+            - CreateFacebook
+            - [COGNITO, !Ref FacebookIdentityProvider]
+            - [COGNITO]
+        # Adopt mode: providers the existing pool already has (param).
+        - !Ref MobileIdentityProviders
       AllowedOAuthFlows: [code]
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthScopes: [openid, email, profile]
@@ -972,6 +1048,7 @@ Resources:
 
   AdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
+    Condition: CreateDataPlane
     Properties:
       GroupName: admins
       UserPoolId: !Ref UserPool
@@ -983,6 +1060,7 @@ Resources:
   # =========================================================================
   InvitesTable:
     Type: AWS::DynamoDB::Table
+    Condition: CreateDataPlane
     Properties:
       TableName: !Sub "schuit-sharing-${Stage}-invites"
       BillingMode: PAY_PER_REQUEST
@@ -996,6 +1074,7 @@ Resources:
 
   MountsTable:
     Type: AWS::DynamoDB::Table
+    Condition: CreateDataPlane
     Properties:
       TableName: !Sub "schuit-sharing-${Stage}-mounts"
       BillingMode: PAY_PER_REQUEST
@@ -1006,6 +1085,7 @@ Resources:
 
   PublicSharesTable:
     Type: AWS::DynamoDB::Table
+    Condition: CreateDataPlane
     Properties:
       TableName: !Sub "schuit-sharing-${Stage}-public-shares"
       BillingMode: PAY_PER_REQUEST
@@ -1029,13 +1109,14 @@ Resources:
 # ---------------------------------------------------------------------------
 Outputs:
   UserPoolId:
-    Value: !Ref UserPool
+    Value: !If [CreateDataPlane, !Ref UserPool, !Ref ExistingUserPoolId]
   UserPoolClientId:
-    Value: !Ref UserPoolClient
+    Value: !If [CreateDataPlane, !Ref UserPoolClient, !Ref ExistingWebClientId]
   UserPoolClientMobileId:
     Value: !Ref UserPoolClientMobile
   CognitoDomain:
-    Value: !Sub "https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+    # Domain prefix is deterministic (schuit-sharing-<stage>-<acct>) in both modes.
+    Value: !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   ApiEndpoint:
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   HttpApiId:

@@ -86,7 +86,11 @@ import {
 const STAGE = process.env.STAGE || "dev";
 const REGION = process.env.AWS_REGION || "us-east-1";
 const SERVICE = "schuit-sharing";
-const STACK_NAME = `${SERVICE}-${STAGE}`;
+// STACK_NAME + FUNCTION_PREFIX are overridable so this works for both the
+// Serverless stack (schuit-sharing-<stage>) and the SAM adopt stack
+// (STACK_NAME=schuit-sharing-prod-sam, FUNCTION_PREFIX=schuit-sharing-prod-sam).
+const STACK_NAME = process.env.STACK_NAME || `${SERVICE}-${STAGE}`;
+const FUNCTION_PREFIX = process.env.FUNCTION_PREFIX || `${SERVICE}-${STAGE}`;
 
 const cfn = new CloudFormationClient({ region: REGION });
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
@@ -110,9 +114,9 @@ async function getFunctionArn(name) {
 async function main() {
   console.log(`==> Looking up resources from stack ${STACK_NAME} in ${REGION}`);
   const userPoolId = await getStackOutput("UserPoolId");
-  const preSignUpArn = await getFunctionArn(`${SERVICE}-${STAGE}-preSignUp`);
-  const postAuthArn = await getFunctionArn(`${SERVICE}-${STAGE}-postAuth`);
-  const preTokenGenArn = await getFunctionArn(`${SERVICE}-${STAGE}-preTokenGen`);
+  const preSignUpArn = await getFunctionArn(`${FUNCTION_PREFIX}-preSignUp`);
+  const postAuthArn = await getFunctionArn(`${FUNCTION_PREFIX}-postAuth`);
+  const preTokenGenArn = await getFunctionArn(`${FUNCTION_PREFIX}-preTokenGen`);
   console.log(`    UserPoolId       = ${userPoolId}`);
   console.log(`    PreSignUp ARN    = ${preSignUpArn}`);
   console.log(`    PostAuth ARN     = ${postAuthArn}`);

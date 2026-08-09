@@ -24,17 +24,24 @@ capabilities = "CAPABILITY_NAMED_IAM"
 s3_bucket = "schuit-sharing-sam-artifacts-587449585882"
 confirm_changeset = false
 fail_on_empty_changeset = false
-parameter_overrides = "Stage=samtest SharesBucket=schuit-sharing-samtest SiteOrigin=http://localhost:5173"
+parameter_overrides = "Stage=samtest SharesBucket=schuit-sharing-samtest SiteOrigin=http://localhost:5173 FunctionNamePrefix=schuit-sharing-samtest"
 
 # ===========================================================================
-# prod — the LIVE environment (sharing.schuit.io). DO NOT `sam deploy` this
-# blindly: a plain deploy would try to CREATE a UserPool + DynamoDB tables that
-# already exist and fail (or, worse, replace them). The prod cutover is done via
-# CloudFormation RESOURCE IMPORT of the existing pool + tables. See SAM.md
-# "Prod cutover". OAuth secrets are injected by scripts/sam-deploy.mjs, not here.
+# prod — the LIVE environment (sharing.schuit.io), ADOPT mode. This is a NEW,
+# PARALLEL stack (`schuit-sharing-prod-sam`) that references the existing Cognito
+# pool + DynamoDB tables (created by the Serverless stack `schuit-sharing-prod`)
+# instead of creating them. It only creates compute (Lambdas, HTTP API, role) +
+# a new mobile client. Deploying it does NOT touch the live pool/tables.
+#
+# Function names are prefixed `schuit-sharing-prod-sam-*` so they do NOT collide
+# with the still-live Serverless `schuit-sharing-prod-*` Lambdas.
+#
+# OAuth secrets (GoogleClientSecret/FacebookClientSecret) are NOT stored here —
+# pass them at deploy time from SSM. See SAM.md "Prod cutover" for the full
+# staged runbook and the exact deploy command.
 # ===========================================================================
 [prod.global.parameters]
-stack_name = "schuit-sharing-prod"
+stack_name = "schuit-sharing-prod-sam"
 region = "us-east-1"
 
 [prod.build.parameters]
@@ -46,4 +53,4 @@ capabilities = "CAPABILITY_NAMED_IAM"
 resolve_s3 = true
 confirm_changeset = true
 fail_on_empty_changeset = false
-parameter_overrides = "Stage=prod SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io"
+parameter_overrides = "Stage=prod FunctionNamePrefix=schuit-sharing-prod-sam SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io ExistingUserPoolId=us-east-1_8Zf0FwRVl ExistingWebClientId=mai2ubk9ca9apj335bth8os2g"
