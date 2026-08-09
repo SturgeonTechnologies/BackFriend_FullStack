@@ -142,6 +142,17 @@ async function main() {
     PreTokenGeneration: preTokenGenArn,
   };
 
+  // If the pool uses the V2 advanced pre-token-generation trigger
+  // (PreTokenGenerationConfig), Cognito requires its LambdaArn to match the V1
+  // PreTokenGeneration ARN — otherwise UpdateUserPool rejects the call. Keep the
+  // configured LambdaVersion, just repoint the ARN.
+  if (desiredLambdaConfig.PreTokenGenerationConfig) {
+    desiredLambdaConfig.PreTokenGenerationConfig = {
+      ...desiredLambdaConfig.PreTokenGenerationConfig,
+      LambdaArn: preTokenGenArn,
+    };
+  }
+
   // Idempotency: skip if already wired correctly.
   const current = pool.LambdaConfig ?? {};
   if (
