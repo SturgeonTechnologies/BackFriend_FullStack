@@ -153,14 +153,31 @@ async function main() {
     };
   }
 
-  // Idempotency: skip if already wired correctly.
+  // Email: send Cognito's own verification/recovery mail through SES. The default
+  // COGNITO_DEFAULT sender is throttled (~50/day) and unreliable, so native
+  // sign-up codes and forgot-password emails silently fail to deliver.
+  const accountId = preSignUpArn.split(":")[4];
+  const desiredEmailConfiguration = {
+    EmailSendingAccount: "DEVELOPER",
+    From: process.env.COGNITO_EMAIL_FROM || "Schuit Sharing <noreply@schuit.io>",
+    SourceArn:
+      process.env.SES_SOURCE_ARN ||
+      `arn:aws:ses:${REGION}:${accountId}:identity/schuit.io`,
+  };
+
+  // Idempotency: skip only if BOTH the triggers and the email config are correct.
   const current = pool.LambdaConfig ?? {};
-  if (
+  const email = pool.EmailConfiguration ?? {};
+  const triggersOk =
     current.PreSignUp === preSignUpArn &&
     current.PostAuthentication === postAuthArn &&
-    current.PreTokenGeneration === preTokenGenArn
-  ) {
-    console.log("==> LambdaConfig already up to date — nothing to do.");
+    current.PreTokenGeneration === preTokenGenArn;
+  const emailOk =
+    email.EmailSendingAccount === "DEVELOPER" &&
+    email.SourceArn === desiredEmailConfiguration.SourceArn &&
+    email.From === desiredEmailConfiguration.From;
+  if (triggersOk && emailOk) {
+    console.log("==> LambdaConfig + EmailConfiguration already up to date — nothing to do.");
     return;
   }
 
@@ -179,7 +196,7 @@ async function main() {
       EmailVerificationMessage: pool.EmailVerificationMessage,
       EmailVerificationSubject: pool.EmailVerificationSubject,
       VerificationMessageTemplate: pool.VerificationMessageTemplate,
-      EmailConfiguration: pool.EmailConfiguration,
+      EmailConfiguration: desiredEmailConfiguration,
       SmsConfiguration: pool.SmsConfiguration,
       SmsAuthenticationMessage: pool.SmsAuthenticationMessage,
       DeviceConfiguration: pool.DeviceConfiguration,
