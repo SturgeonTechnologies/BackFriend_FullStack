@@ -122,7 +122,17 @@ sam deploy --config-env <stage> \
   --parameter-overrides "GoogleClientId=$GID GoogleClientSecret=$GSEC ..."
 ```
 
-## Prod cutover (NOT done yet — separate, deliberate step)
+## Prod cutover — DONE (2026-08-09)
+
+`sharing.schuit.io` (CloudFront `rom-hub-frontend`) now routes `/api/*` to
+`schuit-sharing-prod-sam`'s API (`6oweubywx9.execute-api.us-east-1.amazonaws.com`).
+The old Serverless stack (`schuit-sharing-prod`) was deleted the same day. `prod`
+deploys now mean `sam build --config-env prod && sam deploy --config-env prod`
+— `serverless deploy --stage prod` no longer has a stack to deploy to. The
+runbook below is kept for reference (and because it's still exactly the
+procedure to follow if `prod-sam` ever needs a from-scratch redo).
+
+## Prod cutover runbook (historical — already executed)
 
 Approach: a **parallel SAM compute stack** (`schuit-sharing-prod-sam`, adopt mode)
 runs alongside the live Serverless stack referencing the same pool + tables; the
@@ -159,7 +169,6 @@ current HttpApi `g35h6wblu7`, front-door CloudFront stack `rom-hub-frontend`
 **Rollback:** flip `ApiGatewayDomain` back to `g35h6wblu7.execute-api.us-east-1.amazonaws.com`
 and re-wire triggers with `FUNCTION_PREFIX=schuit-sharing-prod STACK_NAME=schuit-sharing-prod`.
 
-Until cutover, prod continues to be deployed with `serverless deploy --stage prod`.
 
 ## Mobile client
 
