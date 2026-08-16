@@ -34,6 +34,11 @@ Parameters:
     Default: http://localhost:5173
     Description: Public site origin used when building public share links / redirects.
 
+  AppDisplayName:
+    Type: String
+    Default: Sharing App
+    Description: Friendly name returned by GET /config, shown by clients (e.g. mobile) when adding this backend as an account.
+
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: http://localhost:5173
@@ -746,6 +751,40 @@ Resources:
         Target: node20
         EntryPoints:
           - src/handlers/admin/unsetPublic.ts
+
+  # =========================================================================
+  # Public: backend discovery (NO authorizer). Lets a client (e.g. the mobile
+  # app's "add account" flow) learn the Cognito Hosted UI endpoint + PKCE
+  # client id from just the API base URL, instead of requiring manual entry.
+  # =========================================================================
+  GetConfig:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-getConfig"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: getConfig.handler
+      Environment:
+        Variables:
+          APP_DISPLAY_NAME: !Ref AppDisplayName
+          COGNITO_DOMAIN: !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+          COGNITO_CLIENT_ID: !Ref UserPoolClientMobile
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /config
+            # No Auth block -> unauthenticated (needed before the client has signed in).
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/public/getConfig.ts
 
   # =========================================================================
   # Public: resolve a share token (NO authorizer)
