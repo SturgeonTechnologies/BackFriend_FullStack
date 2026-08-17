@@ -15,6 +15,17 @@
 // what each step does and the raw commands, in case something here doesn't
 // fit your setup or you'd rather run it by hand.
 //
+// Interactive by default, but every prompt can be preset via a --flag or
+// env var so repeat/test runs don't need retyping. `--yes` accepts the
+// suggested default for any yes/no prompt not explicitly answered. See
+// FLAGS below for the full list, or just run it once interactively --
+// each prompt echoes the flag/env var name that would have preset it.
+//
+// Examples:
+//   node scripts/quickstart.mjs
+//   node scripts/quickstart.mjs --space devtest --domain devtest.example.com --yes
+//   SPACE_NAME=devtest DOMAIN=devtest.example.com ASSUME_YES=1 node scripts/quickstart.mjs
+//
 // Usage: node scripts/quickstart.mjs   (from the repo root, or via
 //        ./quickstart.sh / .\quickstart.ps1 which just check for Node first)
 
@@ -28,17 +39,93 @@ import { stdin, stdout } from "node:process";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const rl = createInterface({ input: stdin, output: stdout });
 
-async function ask(question, fallback) {
+// ---------- CLI flags / env vars ----------
+// FLAGS: --space/SPACE_NAME, --stage/STAGE, --region/REGION,
+// --shares-bucket/SHARES_BUCKET, --admin-email/ADMIN_EMAIL, --domain/DOMAIN,
+// --parent-zone/PARENT_ZONE, --mail-from-sub/MAIL_FROM_SUB,
+// --google-client-id/GOOGLE_CLIENT_ID, --google-client-secret/GOOGLE_CLIENT_SECRET,
+// --facebook-client-id/FACEBOOK_CLIENT_ID, --facebook-client-secret/FACEBOOK_CLIENT_SECRET,
+// --google/--no-google, --facebook/--no-facebook,
+// --deploy-backend/--no-deploy-backend, --deploy-frontend/--no-deploy-frontend,
+// --deploy-ses/--no-deploy-ses, --redeploy-after-ses/--no-redeploy-after-ses,
+// --overwrite/--no-overwrite, --yes (accept the default for anything else unanswered)
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) continue;
+    const eq = a.indexOf("=");
+    if (eq !== -1) {
+      out[a.slice(2, eq)] = a.slice(eq + 1);
+      continue;
+    }
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith("--")) {
+      out[a.slice(2)] = next;
+      i++;
+    } else {
+      out[a.slice(2)] = "true";
+    }
+  }
+  return out;
+}
+const argv = parseArgs(process.argv.slice(2));
+
+function presetValue(name, envName) {
+  if (argv[name] !== undefined) return argv[name];
+  if (envName && process.env[envName] !== undefined) return process.env[envName];
+  return undefined;
+}
+
+function truthy(v) {
+  const s = String(v).toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "y";
+}
+
+// Tri-state: true/false if explicitly set (via --name, --no-name, or env), else undefined.
+function presetBool(name, envName) {
+  if (argv[`no-${name}`] !== undefined) return false;
+  const v = presetValue(name, envName);
+  return v === undefined ? undefined : truthy(v);
+}
+
+const ASSUME_YES = presetBool("yes", "ASSUME_YES") === true;
+
+async function ask(question, fallback, preset) {
+  if (preset !== undefined && preset !== "") {
+    console.log(`${question}: ${preset}`);
+    return preset;
+  }
   const suffix = fallback ? ` [${fallback}]` : "";
   const answer = (await rl.question(`${question}${suffix}: `)).trim();
   return answer || fallback || "";
 }
 
-async function askYesNo(question, defaultYes = false) {
+async function askYesNo(question, defaultYes = false, preset) {
+  let use = preset;
+  if (use === undefined && ASSUME_YES) use = defaultYes;
+  if (use !== undefined) {
+    console.log(`${question} [${use ? "y" : "n"}]`);
+    return use;
+  }
   const hint = defaultYes ? "Y/n" : "y/N";
   const answer = (await rl.question(`${question} [${hint}]: `)).trim().toLowerCase();
   if (!answer) return defaultYes;
   return answer.startsWith("y");
+}
+
+// ---------- DNS-safe naming ----------
+// Space name feeds stack names, the Cognito domain prefix, and (via the
+// domain) DNS labels -- all of which have the same real constraint: lowercase
+// letters/digits/hyphens, starting with a letter. Sanitize instead of just
+// rejecting, so a stray space/underscore/capital doesn't send you back to
+// retype the whole thing (or worse, surface as an opaque CFN error later).
+function toDnsSafeName(input, maxLen = 24) {
+  let s = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!/^[a-z]/.test(s)) s = `s-${s}`;
+  s = s.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  if (s.length > maxLen) s = s.slice(0, maxLen).replace(/-+$/, "");
+  return s || "space";
 }
 
 const NEEDS_SHELL = process.platform === "win32";
@@ -111,7 +198,9 @@ async function main() {
   console.log("domains for the API/Cognito Hosted UI -- those need a");
   console.log("console only you control, or (for Cognito) are disruptive");
   console.log("enough to sign-in that they shouldn't happen as a side");
-  console.log("effect of a routine setup run. See README.md for those.\n");
+  console.log("effect of a routine setup run. See README.md for those.");
+  console.log("\nEvery prompt below can be preset with a --flag or env var");
+  console.log("for repeat/test runs -- see the file header for the full list.\n");
 
   console.log("Checking prerequisites...");
   const missing = ["aws", "sam", "node"].filter((c) => !have(c));
@@ -121,16 +210,43 @@ async function main() {
   }
   console.log("  OK: aws, sam, node all found.\n");
 
-  const spaceName = await ask("Space name (lowercase, used to derive stack/bucket/function names, e.g. \"myspace\")");
-  if (!/^[a-z][a-z0-9-]*$/.test(spaceName)) {
-    console.error('Space name must be lowercase letters/digits/hyphens, starting with a letter.');
-    process.exit(1);
+  let spaceName;
+  const presetSpace = presetValue("space", "SPACE_NAME");
+  if (presetSpace) {
+    spaceName = toDnsSafeName(presetSpace);
+    if (spaceName !== presetSpace) {
+      console.log(`Space name "${presetSpace}" isn't DNS-safe -- using "${spaceName}" instead.`);
+    } else {
+      console.log(`Space name: ${spaceName}`);
+    }
+  } else {
+    while (true) {
+      const raw = await ask("Space name (used to derive stack/bucket/Cognito-domain/DNS names, e.g. \"myspace\")");
+      if (!raw) {
+        console.log("Space name is required.");
+        continue;
+      }
+      const safe = toDnsSafeName(raw);
+      if (safe === raw) {
+        spaceName = safe;
+        break;
+      }
+      if (await askYesNo(`"${raw}" isn't DNS-safe (lowercase letters/digits/hyphens, starting with a letter) -- use "${safe}" instead?`, true)) {
+        spaceName = safe;
+        break;
+      }
+    }
   }
-  const stage = await ask("Deployment stage (e.g. prod, dev, test)", "prod");
-  const region = await ask("AWS region", "us-east-1");
-  const sharesBucket = await ask("S3 bucket to store shared files in (created if missing)", spaceName);
-  const adminEmail = await ask("Admin email (bootstrapped as admin on first sign-in)");
-  const domain = await ask("Public domain for the SPA (leave blank to skip for now -- you can add it later, see README step 4)");
+
+  const stage = await ask("Deployment stage (e.g. prod, dev, test)", "prod", presetValue("stage", "STAGE"));
+  const region = await ask("AWS region", "us-east-1", presetValue("region", "REGION"));
+  const sharesBucket = await ask("S3 bucket to store shared files in (created if missing)", spaceName, presetValue("shares-bucket", "SHARES_BUCKET"));
+  const adminEmail = await ask("Admin email (bootstrapped as admin on first sign-in)", undefined, presetValue("admin-email", "ADMIN_EMAIL"));
+  const domain = await ask(
+    "Public domain for the SPA (leave blank to skip for now -- you can add it later, see README step 4)",
+    undefined,
+    presetValue("domain", "DOMAIN"),
+  );
 
   const accountId = runQuiet("aws", ["sts", "get-caller-identity", "--query", "Account", "--output", "text"]).trim();
   const artifactBucket = `${spaceName}-sam-artifacts-${accountId}`;
@@ -152,18 +268,18 @@ async function main() {
 
   const oauth = {};
   console.log("\nOAuth sign-in (optional -- skip for email/password-only; you can add these later by editing the config and redeploying).");
-  if (await askYesNo("Set up Google sign-in now? (you need a Client ID/Secret already created -- see README step 1)")) {
-    const clientId = await ask("  Google Client ID");
-    const clientSecret = await ask("  Google Client Secret");
+  if (await askYesNo("Set up Google sign-in now? (you need a Client ID/Secret already created -- see README step 1)", false, presetBool("google"))) {
+    const clientId = await ask("  Google Client ID", undefined, presetValue("google-client-id", "GOOGLE_CLIENT_ID"));
+    const clientSecret = await ask("  Google Client Secret", undefined, presetValue("google-client-secret", "GOOGLE_CLIENT_SECRET"));
     const idParam = `/${spaceName}/${stage}/google/client_id`;
     const secretParam = `/${spaceName}/${stage}/google/client_secret`;
     run("aws", ["ssm", "put-parameter", "--name", idParam, "--type", "String", "--value", clientId, "--overwrite", "--region", region]);
     run("aws", ["ssm", "put-parameter", "--name", secretParam, "--type", "SecureString", "--value", clientSecret, "--overwrite", "--region", region]);
     oauth.google = { clientIdSsmParam: idParam, clientSecretSsmParam: secretParam };
   }
-  if (await askYesNo("Set up Facebook sign-in now? (you need an App ID/Secret already created -- see README step 1)")) {
-    const clientId = await ask("  Facebook App ID");
-    const clientSecret = await ask("  Facebook App Secret");
+  if (await askYesNo("Set up Facebook sign-in now? (you need an App ID/Secret already created -- see README step 1)", false, presetBool("facebook"))) {
+    const clientId = await ask("  Facebook App ID", undefined, presetValue("facebook-client-id", "FACEBOOK_CLIENT_ID"));
+    const clientSecret = await ask("  Facebook App Secret", undefined, presetValue("facebook-client-secret", "FACEBOOK_CLIENT_SECRET"));
     const idParam = `/${spaceName}/${stage}/facebook/client_id`;
     const secretParam = `/${spaceName}/${stage}/facebook/client_secret`;
     run("aws", ["ssm", "put-parameter", "--name", idParam, "--type", "String", "--value", clientId, "--overwrite", "--region", region]);
@@ -201,7 +317,7 @@ async function main() {
 
   const configPath = resolve(REPO_ROOT, "backend", `deploy.config.${spaceName}.json`);
   if (existsSync(configPath)) {
-    if (!(await askYesNo(`${configPath} already exists. Overwrite?`))) {
+    if (!(await askYesNo(`${configPath} already exists. Overwrite?`, false, presetBool("overwrite")))) {
       console.log("Aborted -- nothing written.");
       process.exit(0);
     }
@@ -217,7 +333,7 @@ async function main() {
 
   const backendDir = resolve(REPO_ROOT, "backend");
   let backendDeployed = false;
-  if (await askYesNo("\nRun the backend deploy now? (sam build + deploy, Cognito wiring)", true)) {
+  if (await askYesNo("\nRun the backend deploy now? (sam build + deploy, Cognito wiring)", true, presetBool("deploy-backend"))) {
     console.log();
     if (!existsSync(resolve(backendDir, "node_modules"))) {
       console.log("==> Installing backend dependencies (first run)");
@@ -231,8 +347,8 @@ async function main() {
 
   if (domain) {
     console.log("\n---\nStep 4: frontend hosting (CloudFront + ACM + Route 53)");
-    if (await askYesNo(`Deploy the frontend hosting stack for ${domain} now?`, true)) {
-      const parentZone = await ask("Parent Route 53 hosted zone", domain);
+    if (await askYesNo(`Deploy the frontend hosting stack for ${domain} now?`, true, presetBool("deploy-frontend"))) {
+      const parentZone = await ask("Parent Route 53 hosted zone", domain, presetValue("parent-zone", "PARENT_ZONE"));
       const zoneId = hostedZoneIdFor(parentZone);
       if (!zoneId) {
         console.log(`\nNo hosted zone found for ${parentZone}. Create one first:`);
@@ -265,9 +381,9 @@ async function main() {
     }
 
     console.log("\n---\nStep 4b: SES (invite emails)");
-    if (await askYesNo(`Deploy the SES email stack for ${domain} now?`, true)) {
-      const mailFromSub = await ask("MAIL FROM subdomain", "mail");
-      const parentZone = await ask("Parent Route 53 hosted zone", domain);
+    if (await askYesNo(`Deploy the SES email stack for ${domain} now?`, true, presetBool("deploy-ses"))) {
+      const mailFromSub = toDnsSafeName(await ask("MAIL FROM subdomain", "mail", presetValue("mail-from-sub", "MAIL_FROM_SUB")), 32);
+      const parentZone = await ask("Parent Route 53 hosted zone", domain, presetValue("parent-zone", "PARENT_ZONE"));
       const zoneId = hostedZoneIdFor(parentZone);
       if (!zoneId) {
         console.log(`\nNo hosted zone found for ${parentZone}. See README.md step 4b.`);
@@ -289,7 +405,7 @@ async function main() {
         console.log(`  aws ses verify-email-identity --region us-east-1 --email-address ${adminEmail || "you@example.com"}`);
         console.log("then request production access (usually granted within 24h):");
         console.log("  https://console.aws.amazon.com/ses/home?region=us-east-1#/account");
-        if (await askYesNo("\nRedeploy the backend now so MAIL_FROM/MAIL_REGION land?", backendDeployed)) {
+        if (await askYesNo("\nRedeploy the backend now so MAIL_FROM/MAIL_REGION land?", backendDeployed, presetBool("redeploy-after-ses"))) {
           run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
         } else {
           console.log(`\nWhen ready: cd backend && node scripts/deploy.mjs deploy.config.${spaceName}.json`);
@@ -299,6 +415,9 @@ async function main() {
       console.log("Skipped -- run infrastructure/email-deploy.sh, or see README.md step 4b, when ready.");
     }
   }
+
+  console.log(`\nWhen you're done testing this space, tear it down with:`);
+  console.log(`  node scripts/teardown.mjs --space ${spaceName} --yes`);
 
   rl.close();
 }

@@ -30,6 +30,30 @@ deploys (steps 2 through 4b). It's a convenience wrapper, not a replacement for 
 what it's doing — the numbered steps below are still the reference for what each one does and
 the raw commands, in case anything doesn't fit your setup.
 
+Every prompt it asks can be preset with a `--flag` or env var instead, so you can rerun the same
+test deployment without retyping everything each time — `--yes` accepts the suggested default
+for anything you didn't explicitly preset:
+
+```bash
+node scripts/quickstart.mjs --space devtest --domain devtest.your-domain.example --admin-email you@example.com --yes
+```
+
+See the header comment in `scripts/quickstart.mjs` for the full flag/env var list. Space names
+are auto-sanitized into something DNS- and stack-name-safe (lowercase, hyphens, starts with a
+letter) — `"My Test Space!"` becomes `my-test-space` — since that name feeds the CloudFormation
+stack names, the Cognito domain prefix, and (once you add a domain) DNS labels.
+
+When you're done with a test space, tear it down (deletes the backend/frontend/SES stacks by the
+naming convention above, or from `deploy.config.<space>.json` if present):
+
+```bash
+node scripts/teardown.mjs --space devtest --yes
+```
+
+It refuses to run against anything that looks like prod (`stage: "prod"` in the config, or a
+space literally named `prod`) unless you type a literal confirmation phrase first — there's no
+flag to skip that part.
+
 - Auth: **Cognito** — sign in with **Google**, **Facebook**, *or* **email + password**
   (all via the Cognito hosted UI; email/password users self-register through the invite
   gate and verify their address with a one-time code)
