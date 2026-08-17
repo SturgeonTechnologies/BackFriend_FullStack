@@ -3,10 +3,13 @@
 
   "$comment_domains": "Recommended domain layout (see README 'Custom domains'): the SPA lives at your bare apex domain (your-domain.example), the API gets its own subdomain (sharing-api.your-domain.example), and Cognito gets its own too (sharing-auth.your-domain.example). Keeps each piece independently swappable and avoids CloudFront path-routing entirely.",
 
+  "$comment_resourcePrefix": "MUST be unique from every other deployment in this same AWS account (or use a different 'stage') -- it names the DynamoDB tables and the auto-generated Cognito domain, both of which collide with another deployment's if this matches. Usually just your space name.",
+
   "stage": "prod",
   "region": "us-east-1",
   "stackName": "your-space-name-sam",
   "functionNamePrefix": "your-space-name-sam",
+  "resourcePrefix": "your-space-name",
   "artifactBucket": "your-space-name-sam-artifacts-<your-aws-account-id>",
 
   "sharesBucket": "your-space-name",

@@ -23,7 +23,7 @@ Parameters:
   Stage:
     Type: String
     Default: samtest
-    Description: Deployment stage; drives all resource names (schuit-sharing-<stage>-*).
+    Description: Deployment stage; drives all resource names (<ResourcePrefix>-<stage>-*).
 
   SharesBucket:
     Type: String
@@ -46,7 +46,7 @@ Parameters:
       Optional Cognito custom domain (e.g. sharing-auth.schuit.io) already
       created + DNS-aliased outside this template (see README "Custom
       domains"). When set, GET /config returns this instead of the
-      auto-generated schuit-sharing-<stage>-<acct> amazoncognito.com domain.
+      auto-generated <ResourcePrefix>-<stage>-<acct> amazoncognito.com domain.
       Leave blank (default) for stages without one.
 
   ApiCustomDomain:
@@ -162,6 +162,22 @@ Parameters:
       "schuit-sharing-samtest", "schuit-sharing-prod-sam"). In adopt mode this MUST
       differ from the still-live Serverless stack's names (schuit-sharing-prod-*).
 
+  ResourcePrefix:
+    Type: String
+    Default: schuit-sharing
+    Description: >
+      Prefix for resources whose NAME must be unique account/globally-wide --
+      DynamoDB tables ("<prefix>-<stage>-invites" etc.), the auto-generated
+      Cognito domain ("<prefix>-<stage>-<acct>.auth...amazoncognito.com" --
+      Cognito domain prefixes are globally unique across ALL AWS accounts,
+      not just yours), and the pool's UserPoolName. DIFFERENT from
+      FunctionNamePrefix on purpose: in adopt mode this must match whatever
+      the EXISTING pre-SAM resources were actually named (which may not
+      match your new FunctionNamePrefix), while in create mode it should
+      just be your own space name -- every deployment in an AWS account
+      MUST use a different ResourcePrefix (or different Stage) or its
+      DynamoDB tables collide with another deployment's.
+
 Conditions:
   # Create the data plane (pool, web client, IdPs, domain, group, tables) unless
   # adopting an existing one (prod cutover). See the ExistingUserPoolId param.
@@ -191,9 +207,9 @@ Globals:
         STAGE: !Ref Stage
         # In adopt mode the tables aren't created here; reference them by their
         # (stage-derived) real names, which this template reproduces exactly.
-        INVITES_TABLE: !If [CreateDataPlane, !Ref InvitesTable, !Sub "schuit-sharing-${Stage}-invites"]
-        MOUNTS_TABLE: !If [CreateDataPlane, !Ref MountsTable, !Sub "schuit-sharing-${Stage}-mounts"]
-        PUBLIC_SHARES_TABLE: !If [CreateDataPlane, !Ref PublicSharesTable, !Sub "schuit-sharing-${Stage}-public-shares"]
+        INVITES_TABLE: !If [CreateDataPlane, !Ref InvitesTable, !Sub "${ResourcePrefix}-${Stage}-invites"]
+        MOUNTS_TABLE: !If [CreateDataPlane, !Ref MountsTable, !Sub "${ResourcePrefix}-${Stage}-mounts"]
+        PUBLIC_SHARES_TABLE: !If [CreateDataPlane, !Ref PublicSharesTable, !Sub "${ResourcePrefix}-${Stage}-public-shares"]
         # USER_POOL_ID intentionally NOT injected (would create a circular dep
         # via UserPool.LambdaConfig -> trigger Lambdas). See serverless.yml notes.
         ADMIN_GROUP: admins
@@ -243,10 +259,10 @@ Resources:
                     - !GetAtt MountsTable.Arn
                     - !GetAtt PublicSharesTable.Arn
                     - !Sub "${PublicSharesTable.Arn}/index/*"
-                  - - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-invites"
-                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-mounts"
-                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-public-shares"
-                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/schuit-sharing-${Stage}-public-shares/index/*"
+                  - - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-invites"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-mounts"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-public-shares"
+                    - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-public-shares/index/*"
               # S3: list the shared bucket
               - Effect: Allow
                 Action:
@@ -825,7 +841,7 @@ Resources:
           COGNITO_DOMAIN: !If
             - HasCognitoCustomDomain
             - !Sub "https://${CognitoCustomDomain}"
-            - !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+            - !Sub "https://${ResourcePrefix}-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
           COGNITO_CLIENT_ID: !Ref UserPoolClientMobile
       Events:
         Api:
@@ -1027,7 +1043,7 @@ Resources:
     # NOTE: LambdaConfig intentionally absent — wired post-deploy by
     # scripts/wire-cognito-triggers.mjs to avoid the CFN circular dependency.
     Properties:
-      UserPoolName: !Sub "schuit-sharing-${Stage}"
+      UserPoolName: !Sub "${ResourcePrefix}-${Stage}"
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       MfaConfiguration: "OFF"
@@ -1080,14 +1096,14 @@ Resources:
     Condition: CreateDataPlane
     Properties:
       UserPoolId: !Ref UserPool
-      Domain: !Sub "schuit-sharing-${Stage}-${AWS::AccountId}"
+      Domain: !Sub "${ResourcePrefix}-${Stage}-${AWS::AccountId}"
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Condition: CreateDataPlane
     Properties:
       UserPoolId: !Ref UserPool
-      ClientName: !Sub "schuit-sharing-${Stage}-web"
+      ClientName: !Sub "${ResourcePrefix}-${Stage}-web"
       GenerateSecret: false
       # !Ref to the IdP resources gives lint-clean conditional membership AND the
       # implicit create-ordering dependency (client after its IdPs).
@@ -1117,7 +1133,7 @@ Resources:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       UserPoolId: !If [CreateDataPlane, !Ref UserPool, !Ref ExistingUserPoolId]
-      ClientName: !Sub "schuit-sharing-${Stage}-mobile"
+      ClientName: !Sub "${ResourcePrefix}-${Stage}-mobile"
       GenerateSecret: false
       SupportedIdentityProviders: !If
         - CreateDataPlane
@@ -1159,7 +1175,7 @@ Resources:
     Type: AWS::DynamoDB::Table
     Condition: CreateDataPlane
     Properties:
-      TableName: !Sub "schuit-sharing-${Stage}-invites"
+      TableName: !Sub "${ResourcePrefix}-${Stage}-invites"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: email, AttributeType: S }
@@ -1173,7 +1189,7 @@ Resources:
     Type: AWS::DynamoDB::Table
     Condition: CreateDataPlane
     Properties:
-      TableName: !Sub "schuit-sharing-${Stage}-mounts"
+      TableName: !Sub "${ResourcePrefix}-${Stage}-mounts"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: mountPath, AttributeType: S }
@@ -1184,7 +1200,7 @@ Resources:
     Type: AWS::DynamoDB::Table
     Condition: CreateDataPlane
     Properties:
-      TableName: !Sub "schuit-sharing-${Stage}-public-shares"
+      TableName: !Sub "${ResourcePrefix}-${Stage}-public-shares"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: mountPath, AttributeType: S }
@@ -1212,13 +1228,14 @@ Outputs:
   UserPoolClientMobileId:
     Value: !Ref UserPoolClientMobile
   CognitoDomain:
-    # Domain prefix is deterministic (schuit-sharing-<stage>-<acct>) in both modes,
-    # unless a custom domain (e.g. auth.schuit.io) was set up outside this template
-    # and passed via CognitoCustomDomain — see that parameter's description.
+    # Domain prefix is deterministic (ResourcePrefix-Stage-acct) in both modes,
+    # unless a custom domain (e.g. sharing-auth.schuit.io) was set up outside
+    # this template and passed via CognitoCustomDomain — see that parameter's
+    # description.
     Value: !If
       - HasCognitoCustomDomain
       - !Sub "https://${CognitoCustomDomain}"
-      - !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+      - !Sub "https://${ResourcePrefix}-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   ApiEndpoint:
     # Always the raw execute-api URL, regardless of ApiCustomDomain -- useful
     # as a fallback/for debugging. Frontend builds should prefer

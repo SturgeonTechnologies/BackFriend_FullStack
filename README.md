@@ -190,6 +190,15 @@ Fill in `deploy.config.<name>.json` — every field is explained by a
 - `stage` / `stackName` / `functionNamePrefix` / `artifactBucket` — names for
   this deployment. `artifactBucket` is a plain S3 bucket SAM uploads build
   artifacts to (`aws s3 mb s3://<name>` once, any region-appropriate name).
+- `resourcePrefix` — **must be unique from every other deployment in the same
+  AWS account** (or use a different `stage`) — it names the DynamoDB tables
+  and the auto-generated Cognito domain, both of which collide silently
+  with another deployment's if this matches (SAM's own early-validation will
+  catch the DynamoDB case with a clear error before changing anything; a
+  Cognito domain collision is caught the same way). Usually just your space
+  name — different from `stackName`/`functionNamePrefix` on purpose, since
+  those two need to differ from a still-live *pre-SAM* deployment's names in
+  adopt mode, while `resourcePrefix` needs to *match* one.
 - `sharesBucket` / `siteOrigin` / `allowedOrigins` / `appDisplayName` /
   `bootstrapAdminEmails` / `mailFrom` — your space's basics. `bootstrapAdminEmails`
   is who gets auto-promoted to admin on first sign-in — no manual user/group setup needed.

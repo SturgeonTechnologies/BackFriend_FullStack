@@ -95,7 +95,7 @@ async function main() {
   const region = cfg.region || "us-east-1";
   process.env.AWS_REGION = region;
 
-  for (const required of ["stage", "stackName", "functionNamePrefix", "artifactBucket", "sharesBucket"]) {
+  for (const required of ["stage", "stackName", "functionNamePrefix", "resourcePrefix", "artifactBucket", "sharesBucket"]) {
     if (!cfg[required]) {
       console.error(`Missing required config field: "${required}"`);
       process.exit(1);
@@ -108,9 +108,17 @@ async function main() {
   // the stack's existing value (redeploy) -- passing an empty string instead
   // would explicitly clobber either with "", which is wrong for params like
   // MailFrom/CognitoCustomDomain that have real defaults or prior values.
+  //
+  // resourcePrefix is required (not defaulted here) on purpose: the template's
+  // own Default ("schuit-sharing") is only correct for THIS deployment. Any
+  // other deployment in the same AWS account that left it unset would try to
+  // create DynamoDB tables / a Cognito domain with the exact same names as
+  // this one and fail (or worse, on a stage that also matched, collide for
+  // real) -- caught the hard way deploying a second space.
   const paramOverrides = {
     Stage: cfg.stage,
     FunctionNamePrefix: cfg.functionNamePrefix,
+    ResourcePrefix: cfg.resourcePrefix,
     SharesBucket: cfg.sharesBucket,
   };
   const setIf = (key, value) => {

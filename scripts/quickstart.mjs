@@ -97,6 +97,7 @@ async function main() {
     console.error('Space name must be lowercase letters/digits/hyphens, starting with a letter.');
     process.exit(1);
   }
+  const stage = await ask("Deployment stage (e.g. prod, dev, test)", "prod");
   const region = await ask("AWS region", "us-east-1");
   const sharesBucket = await ask("S3 bucket to store shared files in (created if missing)", spaceName);
   const adminEmail = await ask("Admin email (bootstrapped as admin on first sign-in)");
@@ -125,8 +126,8 @@ async function main() {
   if (await askYesNo("Set up Google sign-in now? (you need a Client ID/Secret already created -- see README step 1)")) {
     const clientId = await ask("  Google Client ID");
     const clientSecret = await ask("  Google Client Secret");
-    const idParam = `/${spaceName}/prod/google/client_id`;
-    const secretParam = `/${spaceName}/prod/google/client_secret`;
+    const idParam = `/${spaceName}/${stage}/google/client_id`;
+    const secretParam = `/${spaceName}/${stage}/google/client_secret`;
     run("aws", ["ssm", "put-parameter", "--name", idParam, "--type", "String", "--value", clientId, "--overwrite", "--region", region]);
     run("aws", ["ssm", "put-parameter", "--name", secretParam, "--type", "SecureString", "--value", clientSecret, "--overwrite", "--region", region]);
     oauth.google = { clientIdSsmParam: idParam, clientSecretSsmParam: secretParam };
@@ -134,8 +135,8 @@ async function main() {
   if (await askYesNo("Set up Facebook sign-in now? (you need an App ID/Secret already created -- see README step 1)")) {
     const clientId = await ask("  Facebook App ID");
     const clientSecret = await ask("  Facebook App Secret");
-    const idParam = `/${spaceName}/prod/facebook/client_id`;
-    const secretParam = `/${spaceName}/prod/facebook/client_secret`;
+    const idParam = `/${spaceName}/${stage}/facebook/client_id`;
+    const secretParam = `/${spaceName}/${stage}/facebook/client_secret`;
     run("aws", ["ssm", "put-parameter", "--name", idParam, "--type", "String", "--value", clientId, "--overwrite", "--region", region]);
     run("aws", ["ssm", "put-parameter", "--name", secretParam, "--type", "SecureString", "--value", clientSecret, "--overwrite", "--region", region]);
     oauth.facebook = { clientIdSsmParam: idParam, clientSecretSsmParam: secretParam };
@@ -143,10 +144,15 @@ async function main() {
 
   const origin = domain ? `https://${domain}` : "http://localhost:5173";
   const config = {
-    stage: "prod",
+    stage,
     region,
     stackName,
     functionNamePrefix: stackName,
+    // Must be unique from any other deployment's in this AWS account (even
+    // one you don't control) -- it names the DynamoDB tables and the
+    // auto-generated Cognito domain. spaceName always is, since stack names
+    // collide first if two people pick the same one.
+    resourcePrefix: spaceName,
     artifactBucket,
     sharesBucket,
     siteOrigin: origin,
