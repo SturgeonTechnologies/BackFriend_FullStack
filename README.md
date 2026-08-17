@@ -21,6 +21,15 @@ Before you start, make sure you have:
 - [ ] *(Optional)* **A Google Cloud project** for Google sign-in — skip this and Facebook below if you only want email/password
 - [ ] *(Optional)* **A Meta for Developers app** for Facebook sign-in — [developers.facebook.com](https://developers.facebook.com/)
 
+### Quick start
+
+Once you have the above and (if you want federated sign-in) OAuth clients from step 1 below,
+`./quickstart.sh` (macOS/Linux) or `.\quickstart.ps1` (Windows) will walk you through the rest
+interactively — bucket creation, OAuth secrets, and the backend, frontend hosting, and SES
+deploys (steps 2 through 4b). It's a convenience wrapper, not a replacement for understanding
+what it's doing — the numbered steps below are still the reference for what each one does and
+the raw commands, in case anything doesn't fit your setup.
+
 - Auth: **Cognito** — sign in with **Google**, **Facebook**, *or* **email + password**
   (all via the Cognito hosted UI; email/password users self-register through the invite
   gate and verify their address with a one-time code)
