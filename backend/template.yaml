@@ -39,6 +39,15 @@ Parameters:
     Default: Sharing App
     Description: Friendly name returned by GET /config, shown by clients (e.g. mobile) when adding this backend as an account.
 
+  CognitoCustomDomain:
+    Type: String
+    Default: ""
+    Description: >
+      Optional Cognito custom domain (e.g. auth.schuit.io) already created +
+      DNS-aliased outside this template (see SAM.md). When set, GET /config
+      returns this instead of the auto-generated schuit-sharing-<stage>-<acct>
+      amazoncognito.com domain. Leave blank (default) for stages without one.
+
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: http://localhost:5173
@@ -144,6 +153,7 @@ Conditions:
   HasFacebook: !Not [!Equals [!Ref FacebookClientId, ""]]
   CreateGoogle: !And [!Condition CreateDataPlane, !Condition HasGoogle]
   CreateFacebook: !And [!Condition CreateDataPlane, !Condition HasFacebook]
+  HasCognitoCustomDomain: !Not [!Equals [!Ref CognitoCustomDomain, ""]]
 
 # ---------------------------------------------------------------------------
 # Globals — shared Function config (was provider.* in serverless.yml)
@@ -767,7 +777,10 @@ Resources:
       Environment:
         Variables:
           APP_DISPLAY_NAME: !Ref AppDisplayName
-          COGNITO_DOMAIN: !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+          COGNITO_DOMAIN: !If
+            - HasCognitoCustomDomain
+            - !Sub "https://${CognitoCustomDomain}"
+            - !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
           COGNITO_CLIENT_ID: !Ref UserPoolClientMobile
       Events:
         Api:
@@ -1154,8 +1167,13 @@ Outputs:
   UserPoolClientMobileId:
     Value: !Ref UserPoolClientMobile
   CognitoDomain:
-    # Domain prefix is deterministic (schuit-sharing-<stage>-<acct>) in both modes.
-    Value: !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+    # Domain prefix is deterministic (schuit-sharing-<stage>-<acct>) in both modes,
+    # unless a custom domain (e.g. auth.schuit.io) was set up outside this template
+    # and passed via CognitoCustomDomain — see that parameter's description.
+    Value: !If
+      - HasCognitoCustomDomain
+      - !Sub "https://${CognitoCustomDomain}"
+      - !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   ApiEndpoint:
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   HttpApiId:
