@@ -120,6 +120,8 @@ async function main() {
   setIf("AllowedOrigins", cfg.allowedOrigins && csv(cfg.allowedOrigins));
   setIf("AppDisplayName", cfg.appDisplayName);
   setIf("CognitoCustomDomain", cfg.cognitoCustomDomain);
+  setIf("ApiCustomDomain", cfg.apiCustomDomain);
+  setIf("ApiCustomDomainCertArn", cfg.apiCustomDomainCertArn);
   setIf("BootstrapAdminEmails", cfg.bootstrapAdminEmails && csv(cfg.bootstrapAdminEmails));
   setIf("MailFrom", cfg.mailFrom);
   setIf("MailRegion", cfg.mailRegion);
@@ -191,21 +193,28 @@ async function main() {
 
   const cfn = new CloudFormationClient({ region });
   const outputs = await getStackOutputs(cfn, cfg.stackName);
-  console.log(`\n    ApiEndpoint          = ${outputs.ApiEndpoint}`);
-  console.log(`    CognitoDomain        = ${outputs.CognitoDomain}`);
-  console.log(`    UserPoolClientId     = ${outputs.UserPoolClientId}`);
+  console.log(`\n    ApiEndpoint            = ${outputs.ApiEndpoint}`);
+  console.log(`    ApiCustomDomainUrl     = ${outputs.ApiCustomDomainUrl || "(not set)"}`);
+  console.log(`    CognitoDomain          = ${outputs.CognitoDomain}`);
+  console.log(`    UserPoolClientId       = ${outputs.UserPoolClientId}`);
   console.log(`    UserPoolClientMobileId = ${outputs.UserPoolClientMobileId}`);
 
   // ---------- 4. Frontend build + deploy (optional) ----------
   if (cfg.frontend) {
     log(`Building frontend against the deployed stack`);
     const frontendDir = resolve(REPO_ROOT, "frontend");
+    // The API is no longer proxied through the SPA's CloudFront distribution
+    // (see infrastructure/frontend-infra.yml) -- it's called cross-origin, so
+    // this needs to be a full absolute URL, not the old relative "/api".
+    // Prefers the custom domain when configured, else falls back to the raw
+    // execute-api URL.
+    const apiBase = cfg.frontend.apiBase ?? (outputs.ApiCustomDomainUrl || outputs.ApiEndpoint);
     run("npm", ["ci"], { cwd: frontendDir });
     run("npm", ["run", "build"], {
       cwd: frontendDir,
       env: {
         ...process.env,
-        VITE_API_BASE: cfg.frontend.apiBase ?? "/api",
+        VITE_API_BASE: apiBase,
         VITE_USER_POOL_CLIENT_ID: outputs.UserPoolClientId,
         VITE_COGNITO_DOMAIN: outputs.CognitoDomain,
         VITE_REDIRECT_URI: cfg.frontend.redirectUri,

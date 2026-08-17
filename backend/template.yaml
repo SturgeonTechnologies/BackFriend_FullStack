@@ -43,10 +43,30 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      Optional Cognito custom domain (e.g. auth.schuit.io) already created +
-      DNS-aliased outside this template (see SAM.md). When set, GET /config
-      returns this instead of the auto-generated schuit-sharing-<stage>-<acct>
-      amazoncognito.com domain. Leave blank (default) for stages without one.
+      Optional Cognito custom domain (e.g. sharing-auth.schuit.io) already
+      created + DNS-aliased outside this template (see README "Custom
+      domains"). When set, GET /config returns this instead of the
+      auto-generated schuit-sharing-<stage>-<acct> amazoncognito.com domain.
+      Leave blank (default) for stages without one.
+
+  ApiCustomDomain:
+    Type: String
+    Default: ""
+    Description: >
+      Optional native API Gateway custom domain (e.g. sharing-api.schuit.io).
+      When set (together with ApiCustomDomainCertArn), this template creates
+      the ApiGatewayV2 DomainName + ApiMapping resources; you still own the
+      ACM cert and the Route 53 alias record yourself (see README "Custom
+      domains") since those need a domain only you control. Leave both blank
+      for stages that only use the raw execute-api.amazonaws.com URL.
+
+  ApiCustomDomainCertArn:
+    Type: String
+    Default: ""
+    Description: >
+      ACM certificate ARN for ApiCustomDomain, in THIS stack's own region
+      (regional API Gateway custom domains don't need us-east-1 like
+      CloudFront/Cognito do). Required when ApiCustomDomain is set.
 
   AllowedOrigins:
     Type: CommaDelimitedList
@@ -154,6 +174,7 @@ Conditions:
   CreateGoogle: !And [!Condition CreateDataPlane, !Condition HasGoogle]
   CreateFacebook: !And [!Condition CreateDataPlane, !Condition HasFacebook]
   HasCognitoCustomDomain: !Not [!Equals [!Ref CognitoCustomDomain, ""]]
+  HasApiCustomDomain: !Not [!Equals [!Ref ApiCustomDomain, ""]]
 
 # ---------------------------------------------------------------------------
 # Globals — shared Function config (was provider.* in serverless.yml)
@@ -293,6 +314,30 @@ Resources:
                 # Existing web client (adopt) or the created one, plus the mobile client.
                 - !If [CreateDataPlane, !Ref UserPoolClient, !Ref ExistingWebClientId]
                 - !Ref UserPoolClientMobile
+
+  # =========================================================================
+  # Native API Gateway custom domain (e.g. sharing-api.schuit.io). Only
+  # created when both ApiCustomDomain + ApiCustomDomainCertArn are set — the
+  # cert itself is created + DNS-validated outside this template (needs a
+  # domain only the deployer controls; see README "Custom domains"), same
+  # pattern as the Cognito custom domain.
+  # =========================================================================
+  ApiCustomDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasApiCustomDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomain
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCustomDomainCertArn
+          EndpointType: REGIONAL
+
+  ApiCustomDomainMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasApiCustomDomain
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref ApiCustomDomainName
+      Stage: $default
 
   # =========================================================================
   # Cognito trigger Lambdas (wired to the pool POST-deploy by
@@ -1175,6 +1220,18 @@ Outputs:
       - !Sub "https://${CognitoCustomDomain}"
       - !Sub "https://schuit-sharing-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   ApiEndpoint:
+    # Always the raw execute-api URL, regardless of ApiCustomDomain -- useful
+    # as a fallback/for debugging. Frontend builds should prefer
+    # ApiCustomDomainUrl when it's set (see README "Custom domains").
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   HttpApiId:
     Value: !Ref HttpApi
+  ApiCustomDomainUrl:
+    Value: !If [HasApiCustomDomain, !Sub "https://${ApiCustomDomain}", ""]
+  ApiCustomDomainTarget:
+    # The regional target to alias ApiCustomDomain at in Route 53 -- you own
+    # that record yourself (needs a domain only you control), same pattern
+    # as the Cognito custom domain. See README "Custom domains".
+    Value: !If [HasApiCustomDomain, !GetAtt ApiCustomDomainName.RegionalDomainName, ""]
+  ApiCustomDomainHostedZoneId:
+    Value: !If [HasApiCustomDomain, !GetAtt ApiCustomDomainName.RegionalHostedZoneId, ""]

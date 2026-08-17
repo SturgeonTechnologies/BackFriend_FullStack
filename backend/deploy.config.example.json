@@ -1,6 +1,8 @@
 {
   "$comment": "Copy this to deploy.config.<name>.json (gitignored) and fill in your own values, then: node scripts/deploy.mjs deploy.config.<name>.json",
 
+  "$comment_domains": "Recommended domain layout (see README 'Custom domains'): the SPA lives at your bare apex domain (your-domain.example), the API gets its own subdomain (sharing-api.your-domain.example), and Cognito gets its own too (sharing-auth.your-domain.example). Keeps each piece independently swappable and avoids CloudFront path-routing entirely.",
+
   "stage": "prod",
   "region": "us-east-1",
   "stackName": "your-space-name-sam",
@@ -11,6 +13,11 @@
   "siteOrigin": "https://your-domain.example",
   "allowedOrigins": ["https://your-domain.example"],
   "appDisplayName": "My Sharing Space",
+
+  "$comment_customDomains": "Both optional -- omit either/both to use the auto-generated amazoncognito.com domain and/or the raw execute-api.amazonaws.com URL instead. Each needs its own ACM cert + DNS record set up OUTSIDE this config first -- see README 'Custom domains' for the one-time manual steps (a domain only you control, can't be scripted generically).",
+  "cognitoCustomDomain": "sharing-auth.your-domain.example",
+  "apiCustomDomain": "sharing-api.your-domain.example",
+  "apiCustomDomainCertArn": "arn:aws:acm:<region>:<account-id>:certificate/<cert-id>",
 
   "bootstrapAdminEmails": ["you@example.com"],
   "mailFrom": "noreply@your-domain.example",
@@ -40,10 +47,9 @@
     }
   },
 
-  "$comment_frontend": "Omit entirely to only deploy the backend. When present, builds the SPA and syncs it to the S3/CloudFront infra named by distributionStackName (see README 'Deploy the frontend infra' -- must already exist).",
+  "$comment_frontend": "Omit entirely to only deploy the backend. When present, builds the SPA and syncs it to the S3/CloudFront infra named by distributionStackName (see README 'Deploy the frontend infra' -- must already exist). apiBase is optional -- when omitted, it's derived automatically from apiCustomDomainUrl (or the raw ApiEndpoint if you didn't set up a custom API domain).",
   "frontend": {
     "distributionStackName": "your-space-name-frontend",
-    "apiBase": "/api",
     "redirectUri": "https://your-domain.example/auth/callback",
     "logoutRedirect": "https://your-domain.example/",
     "appTitle": "My Sharing Space"

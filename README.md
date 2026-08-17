@@ -228,33 +228,36 @@ The admin(s) listed in `bootstrapAdminEmails` are bootstrapped automatically
 on first sign-in — no need to manually create a user or add them to the
 admins group.
 
-## 4. Deploy the frontend infra (custom domain)
+## 4. Deploy the frontend infra (SPA hosting)
 
 `infrastructure/frontend-infra.yml` creates:
 
-- ACM certificate for `sharing.schuit.io` (DNS-validated)
+- ACM certificate for your chosen domain (DNS-validated)
 - CloudFront Origin Access Control (OAC)
-- CloudFront distribution with two origins:
-  - default → the existing `schuit-sharing` bucket, scoped to the `web/` prefix
-  - `/api/*` → API Gateway
-- Route 53 A-alias `sharing.schuit.io → CloudFront`
+- CloudFront distribution, single origin: the existing `schuit-sharing`
+  bucket, scoped to the `web/` prefix
+- Route 53 A-alias `<your domain> → CloudFront`
 
-The SPA lives at `s3://schuit-sharing/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix.
+**Recommended: the SPA goes at your bare/apex domain** (e.g. `schuit.io`,
+not `sharing.schuit.io`) — see "Custom domains" below for why (the API and
+Cognito get their *own* subdomains instead, so nothing needs to share the
+apex with path-based routing). `DomainName` accepts anything, though; use a
+subdomain if you'd rather.
 
-### DNS model (read this first)
+The SPA lives at `s3://schuit-sharing/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix. The API is **not** proxied through this distribution — see "Custom domains" for how it's reached instead.
 
-**You only need the parent `schuit.io` hosted zone** — there is **no** separate
-hosted zone for `sharing.schuit.io`. Subdomains are just records inside the
-parent zone. This stack adds:
+> [!CAUTION]
+> **DNS model — read this first.** **You only need the parent hosted zone**
+> (e.g. `schuit.io`) — there is **no** separate hosted zone needed for a
+> subdomain. Subdomains are just records inside the parent zone. This stack
+> adds a temporary CNAME for ACM validation (removed after the cert issues)
+> and a permanent A-alias for whatever `DomainName` you give it.
 
-1. A temporary CNAME for ACM DNS validation (removed after the cert issues)
-2. A permanent A-alias `sharing.schuit.io → CloudFront`
-
-If `schuit.io` isn't in Route 53 yet:
+If your domain isn't in Route 53 yet:
 
 ```bash
 aws route53 create-hosted-zone \
-  --name schuit.io \
+  --name your-domain.example \
   --caller-reference "$(date +%s)"
 # then point your domain registrar at the 4 nameservers it prints
 ```
@@ -263,27 +266,25 @@ aws route53 create-hosted-zone \
 
 **Must be deployed in `us-east-1`** — CloudFront requires its ACM cert in that region.
 
-Easiest: use the helper script (auto-discovers the hosted zone ID and API host):
+Easiest: use the helper script (auto-discovers the hosted zone ID):
 
 ```bash
 cd infrastructure
-./deploy.sh
+DOMAIN=your-domain.example ./deploy.sh
 ```
 
 Or run it manually:
 
 ```bash
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
-API_HOST=abc123def.execute-api.us-east-1.amazonaws.com   # backend deploy's ApiEndpoint output, host only (no https://)
 
 aws cloudformation deploy \
   --region us-east-1 \
   --stack-name schuit-sharing-frontend \
   --template-file infrastructure/frontend-infra.yml \
   --parameter-overrides \
-      DomainName=sharing.schuit.io \
+      DomainName=your-domain.example \
       HostedZoneId=$HOSTED_ZONE_ID \
-      ApiGatewayDomain=$API_HOST \
       SiteBucket=schuit-sharing \
       SitePrefix=web \
       SiteBucketRegion=us-east-1 \
@@ -398,46 +399,96 @@ the form shows the `signupUrl` so you can copy/paste it manually.
 The `frontend/.env.local` route is still there for **local dev** against
 `npm run dev`, not for deploying; see "Local development" below.)
 
-## Custom Cognito domain (optional)
+## Custom domains (recommended)
 
-By default Cognito's Hosted UI lives at an auto-generated
-`<stackname>.auth.<region>.amazoncognito.com` domain — functional, but it
-reads as an unfamiliar/untrusted address to real users on the sign-in screen.
-Mapping it to something under your own domain (e.g. `auth.your-domain.example`)
-fixes that. This is a **one-time, manual** step — not part of `deploy.mjs`,
-because it needs a domain only you control and briefly interrupts sign-in
-for *everyone* while it's mid-flight (see the downtime note below), so it
-shouldn't happen as a side effect of a routine redeploy.
+**Recommended layout** — three independent pieces, each on its own
+subdomain, none of them proxying through another:
 
-A Cognito user pool has exactly **one** domain at a time — switching means
-deleting the old one and creating the new one, with a real gap in between
-(the new domain's CloudFront distribution typically takes 15–60 min to go
-live). Do this when it's fine for sign-in to be briefly unavailable.
+| Piece | Domain | Why its own subdomain |
+|---|---|---|
+| SPA (step 4) | `your-domain.example` (apex) | The main thing people visit and bookmark. |
+| API | `sharing-api.your-domain.example` | Called cross-origin directly from the SPA — no CloudFront path-routing to keep in sync, no `/api` prefix-stripping function, no ambiguity for API clients (mobile app discovery, `curl`, etc.) about whether a bare path or a `/api`-prefixed one is correct. |
+| Cognito Hosted UI | `sharing-auth.your-domain.example` | Otherwise it's the auto-generated `*.amazoncognito.com` address — functional, but reads as an unfamiliar/untrusted domain to real users on the sign-in screen. |
 
-1. **Request an ACM cert** for your chosen subdomain, **in `us-east-1`**
-   regardless of where your stack runs (Cognito custom domains are always
-   served via CloudFront):
+Both the API and Cognito domains are **optional** — omit `apiCustomDomain`/`cognitoCustomDomain`
+from your config to keep the raw `execute-api.amazonaws.com` URL and the
+auto-generated `amazoncognito.com` domain instead. Neither is part of
+`deploy.mjs`'s automated flow, and deliberately so:
+
+> [!CAUTION]
+> **Read this first.** Both need a domain only *you* control (can't be
+> scripted generically), and the Cognito swap specifically **interrupts
+> sign-in for everyone** while it's mid-flight — a user pool has exactly one
+> domain at a time, so switching means deleting the old one and creating the
+> new one, with a real gap in between (the new domain's CloudFront
+> distribution typically takes 15–60 min to go live). Do these when it's
+> fine for sign-in to be briefly unavailable, not as a side effect of a
+> routine redeploy.
+
+### API custom domain
+
+1. **Request an ACM cert** for `sharing-api.your-domain.example`, in the
+   **same region your API runs in** (regional API Gateway custom domains
+   don't need `us-east-1` the way CloudFront/Cognito do):
    ```bash
-   aws acm request-certificate --domain-name auth.your-domain.example \
+   aws acm request-certificate --domain-name sharing-api.your-domain.example \
+     --validation-method DNS --region <your-region>
+   ```
+   Add the DNS validation CNAME (`aws acm describe-certificate
+   --certificate-arn <arn> --region <your-region> --query
+   "Certificate.DomainValidationOptions[0].ResourceRecord"`), wait for
+   `Status` to become `ISSUED`.
+
+2. **Set `apiCustomDomain` + `apiCustomDomainCertArn`** in your
+   `deploy.config.<name>.json` and redeploy (`node scripts/deploy.mjs
+   deploy.config.<name>.json`) — this creates the `ApiGatewayV2::DomainName`
+   + `ApiMapping` resources and prints two new outputs: `ApiCustomDomainTarget`
+   (the regional domain to alias) and `ApiCustomDomainHostedZoneId`.
+
+3. **Alias your subdomain to it**:
+   ```bash
+   aws route53 change-resource-record-sets --hosted-zone-id <your-zone-id> --change-batch '{
+     "Changes": [{
+       "Action": "UPSERT",
+       "ResourceRecordSet": {
+         "Name": "sharing-api.your-domain.example.",
+         "Type": "A",
+         "AliasTarget": { "HostedZoneId": "<ApiCustomDomainHostedZoneId>", "DNSName": "<ApiCustomDomainTarget>.", "EvaluateTargetHealth": false }
+       }
+     }]
+   }'
+   ```
+   (Unlike CloudFront's fixed `Z2FDTNDATAQYW2`, the API Gateway alias-target
+   hosted zone ID is domain-specific — always use the `ApiCustomDomainHostedZoneId`
+   output, not a hardcoded constant.)
+
+4. **Rebuild + redeploy the frontend** (step 3's `frontend` block) — its
+   bundle has the API URL baked in at build time and won't pick up the new
+   domain just because the backend redeployed.
+
+### Cognito custom domain
+
+1. **Request an ACM cert** for `sharing-auth.your-domain.example`, **in
+   `us-east-1`** regardless of where your stack runs (Cognito custom domains
+   are always served via CloudFront):
+   ```bash
+   aws acm request-certificate --domain-name sharing-auth.your-domain.example \
      --validation-method DNS --region us-east-1
    ```
-   Add the DNS validation CNAME it gives you (`aws acm describe-certificate
-   --certificate-arn <arn> --region us-east-1 --query
-   "Certificate.DomainValidationOptions[0].ResourceRecord"`) to your hosted
-   zone, then wait for `Status` to become `ISSUED`.
+   Validate the same way as above, wait for `ISSUED`.
 
 2. **Gotcha:** Cognito requires your domain's *parent* to already resolve
    (have an A record) before it'll create a subdomain custom domain — even
    though the record isn't otherwise related to Cognito at all. If your
-   apex domain has no A record yet, add one (e.g. alias it to any
-   CloudFront distribution you already have, like your frontend's) before
-   the next step, or `create-user-pool-domain` fails with "Was not able to
-   resolve a DNS A record for the parent domain."
+   apex domain has no A record yet (e.g. you haven't done step 4), add one
+   (alias it to any CloudFront distribution you already have) first, or
+   `create-user-pool-domain` fails with "Was not able to resolve a DNS A
+   record for the parent domain."
 
 3. **Swap the domain** (this is the disruptive step):
    ```bash
    aws cognito-idp delete-user-pool-domain --domain <old-domain-prefix> --user-pool-id <pool-id>
-   aws cognito-idp create-user-pool-domain --domain auth.your-domain.example \
+   aws cognito-idp create-user-pool-domain --domain sharing-auth.your-domain.example \
      --user-pool-id <pool-id> \
      --custom-domain-config CertificateArn=<the-acm-cert-arn>
    ```
@@ -449,14 +500,14 @@ live). Do this when it's fine for sign-in to be briefly unavailable.
      "Changes": [{
        "Action": "UPSERT",
        "ResourceRecordSet": {
-         "Name": "auth.your-domain.example.",
+         "Name": "sharing-auth.your-domain.example.",
          "Type": "A",
          "AliasTarget": { "HostedZoneId": "Z2FDTNDATAQYW2", "DNSName": "<CloudFrontDomain>.", "EvaluateTargetHealth": false }
        }
      }]
    }'
    ```
-   Poll `aws cognito-idp describe-user-pool-domain --domain auth.your-domain.example`
+   Poll `aws cognito-idp describe-user-pool-domain --domain sharing-auth.your-domain.example`
    until `Status` is `ACTIVE`.
 
 4. **Point the backend at it**: set `cognitoCustomDomain` in your
@@ -464,9 +515,8 @@ live). Do this when it's fine for sign-in to be briefly unavailable.
    `GET /config` (for the mobile app) and the `CognitoDomain` stack output
    (for the frontend build).
 
-5. **Rebuild + redeploy the frontend** — its bundle has the *old* domain
-   baked in from the last build and won't pick up the new one just because
-   the backend redeployed (see step 3's `frontend` block).
+5. **Rebuild + redeploy the frontend** — same reason as above, its bundle
+   has the *old* domain baked in from the last build.
 
 6. **Update Google/Facebook redirect URIs**: Cognito sends `<new-domain>/oauth2/idpresponse`
    as the callback to each IdP now, not the old domain — add that URL in

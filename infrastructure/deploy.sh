@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# Deploys the sharing.schuit.io front-door CloudFormation stack.
+# Deploys the SPA's front-door CloudFormation stack (CloudFront + ACM + DNS).
 #
-# Looks up the parent `schuit.io` hosted zone, reads the API Gateway host
-# from the deployed backend stage, and runs `aws cloudformation deploy` in
-# us-east-1.
+# Looks up the hosted zone for PARENT_ZONE and runs `aws cloudformation
+# deploy` in us-east-1. This is a one-time step per domain -- once it
+# exists, `node ../backend/scripts/deploy.mjs` builds + syncs the SPA to it
+# on every deploy (see the "frontend" block in deploy.config.<name>.json).
 #
 # The SPA is served from an existing bucket (default: schuit-sharing) under
 # a prefix (default: web). Override with SITE_BUCKET / SITE_PREFIX /
 # SITE_BUCKET_REGION env vars.
 #
 # Usage:
-#   ./deploy.sh                       # stage=prod (the live deployment)
-#   STAGE=dev ./deploy.sh             # personal sandbox / future use
+#   DOMAIN=your-domain.example PARENT_ZONE=your-domain.example ./deploy.sh
 #   PROFILE=my-aws-profile ./deploy.sh
 #   SITE_BUCKET=my-bucket SITE_PREFIX=app ./deploy.sh
 
 set -euo pipefail
 
-STAGE="${STAGE:-prod}"
-DOMAIN="${DOMAIN:-sharing.schuit.io}"
-PARENT_ZONE="${PARENT_ZONE:-schuit.io}"
+DOMAIN="${DOMAIN:?Set DOMAIN, e.g. DOMAIN=your-domain.example ./deploy.sh}"
+PARENT_ZONE="${PARENT_ZONE:-$DOMAIN}"
 STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
 SITE_BUCKET="${SITE_BUCKET:-schuit-sharing}"
 SITE_PREFIX="${SITE_PREFIX:-web}"
@@ -58,25 +57,6 @@ echo "    SiteBucket=$SITE_BUCKET"
 echo "    SitePrefix=$SITE_PREFIX"
 echo "    SiteBucketRegion=$SITE_BUCKET_REGION"
 
-echo "==> Looking up API Gateway host from backend stack (stage=$STAGE) in us-east-1"
-BACKEND_STACK="schuit-sharing-${STAGE}"
-# Backend stack lives in us-east-1 regardless of your aws CLI default region.
-API_ENDPOINT="$(
-  aws cloudformation describe-stacks \
-    --region us-east-1 \
-    --stack-name "$BACKEND_STACK" \
-    --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl' || OutputKey=='ServiceEndpoint' || OutputKey=='ApiEndpoint'].OutputValue | [0]" \
-    --output text $PROFILE_FLAG 2>/dev/null || true
-)"
-if [[ -z "$API_ENDPOINT" || "$API_ENDPOINT" == "None" ]]; then
-  echo "ERROR: could not find API endpoint from stack $BACKEND_STACK" >&2
-  echo "Deploy the backend first: cd ../backend && npx serverless deploy --stage $STAGE" >&2
-  exit 1
-fi
-# Strip https:// and any trailing /stage-name
-API_HOST="$(echo "$API_ENDPOINT" | sed -E 's#^https?://##; s#/.*$##')"
-echo "    ApiGatewayDomain=$API_HOST"
-
 echo "==> Deploying $STACK_NAME to us-east-1"
 aws cloudformation deploy \
   --region us-east-1 \
@@ -85,7 +65,6 @@ aws cloudformation deploy \
   --parameter-overrides \
       DomainName="$DOMAIN" \
       HostedZoneId="$HOSTED_ZONE_ID" \
-      ApiGatewayDomain="$API_HOST" \
       SiteBucket="$SITE_BUCKET" \
       SitePrefix="$SITE_PREFIX" \
       SiteBucketRegion="$SITE_BUCKET_REGION" \
@@ -103,13 +82,9 @@ aws cloudformation describe-stacks \
 cat <<EOF
 
 Done. Next steps:
-  - Add "https://<CognitoDomain>/oauth2/idpresponse" to your Google OAuth
-    client's authorized redirect URIs (if not already).
-  - Fill in frontend/.env.local with the CloudFront URL + Cognito values.
-  - Build and sync the frontend:
-      cd ../frontend
-      npm install && npm run build
-      aws s3 sync dist/ s3://$SITE_BUCKET/$SITE_PREFIX/ --delete
-      aws cloudfront create-invalidation --distribution-id <DistributionId> --paths "/*"
-  - Open https://$DOMAIN and sign in with Google.
+  - Set "distributionStackName": "$STACK_NAME" in your deploy.config.<name>.json's
+    "frontend" block, then run:
+      cd ../backend && node scripts/deploy.mjs deploy.config.<name>.json
+    which builds + syncs the SPA here (and everything else) in one shot.
+  - Open https://$DOMAIN once that's done.
 EOF

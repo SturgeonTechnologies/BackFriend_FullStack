@@ -1,33 +1,18 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: |
-  CloudFront distribution for sharing.schuit.io with:
-    - Default behavior: static React SPA served from an *existing* S3 bucket
-      (default: schuit-sharing, prefix: web/) via OAC
-    - /api/* behavior: proxied to the API Gateway HTTP API created by the backend stack
-    - Cert: ACM in us-east-1 (DNS-validated against the Route 53 hosted zone)
-    - DNS: Route 53 A-alias record pointing sharing.schuit.io at the distribution
-
-  The SPA is stored under s3://<SiteBucket>/<SitePrefix>/, e.g.
-  s3://schuit-sharing/web/index.html. CloudFront's OriginPath prepends
-  /<SitePrefix> so index.html requests hit the right S3 key.
-
-  NOTE: this stack owns the `SiteBucket`'s bucket policy (the CloudFront OAC
-  grant). If `schuit-sharing` needs other bucket-policy statements, add them
-  to the `SiteBucketPolicy` resource here — managing that policy outside
-  the stack will cause drift.
-
-  Deploy this in us-east-1 so the ACM cert is in the required region for CloudFront.
+Description: >
+  CloudFront + ACM + Route53 for the SPA (apex domain). API is NOT proxied
+  here -- it has its own native API Gateway custom domain (see
+  backend/template.yaml ApiCustomDomain + README "Custom domains"). This
+  stack owns SiteBucket's bucket policy (the OAC grant); manage it here, not
+  out of band. Deploy in us-east-1 (CloudFront's ACM cert region requirement).
 
 Parameters:
   DomainName:
     Type: String
-    Default: sharing.schuit.io
+    Description: The apex (or any) domain the SPA is served at, e.g. schuit.io.
   HostedZoneId:
     Type: String
-    Description: Route 53 hosted zone ID for schuit.io
-  ApiGatewayDomain:
-    Type: String
-    Description: The execute-api domain printed by `serverless info` (e.g. xxxxxxxx.execute-api.us-east-1.amazonaws.com)
+    Description: Route 53 hosted zone ID that owns DomainName.
   SiteBucket:
     Type: String
     Default: schuit-sharing
@@ -84,11 +69,6 @@ Resources:
             S3OriginConfig:
               OriginAccessIdentity: ""
             OriginAccessControlId: !GetAtt OriginAccessControl.Id
-          - Id: api-gw
-            DomainName: !Ref ApiGatewayDomain
-            CustomOriginConfig:
-              OriginProtocolPolicy: https-only
-              OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
           TargetOriginId: s3-site
           ViewerProtocolPolicy: redirect-to-https
@@ -99,62 +79,30 @@ Resources:
           FunctionAssociations:
             - EventType: viewer-request
               FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
-        CacheBehaviors:
-          - PathPattern: /api/*
-            TargetOriginId: api-gw
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
-            CachedMethods: [GET, HEAD]
-            Compress: true
-            # No caching for API responses.
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
-            # Pass Authorization + CORS headers through.
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
-            # CRITICAL: same SpaRewriteFunction as the default behavior.
-            # Without this, requests to /api/mounts hit API Gateway with the
-            # literal "/api/" prefix still attached, and API Gateway 404s
-            # because its routes are /mounts, /admin/*, /browse/*. The
-            # function strips "/api" before forwarding to the api-gw origin.
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
         # No global CustomErrorResponses. SPA fallback is handled in the
         # CloudFront Function below (only for non-asset paths), so a missing
         # /assets/foo.js correctly returns 404 instead of being silently
         # rewritten to index.html (which causes the browser to parse HTML as
         # JS and the app to fail to boot).
 
-  # CloudFront Function (viewer-request) that handles two things:
-  #   1. /api/* requests get the "/api" prefix stripped before being sent
-  #      to the API Gateway origin.
-  #   2. SPA fallback: any request that has no file extension (e.g. /admin,
-  #      /browse/roms) is rewritten to /index.html so React Router can
-  #      handle it. Requests for files (anything containing a "." in the
-  #      last path segment, like /assets/index-abc.js or /favicon.ico)
-  #      pass through untouched, so a real missing asset surfaces as 404.
+  # CloudFront Function (viewer-request): SPA fallback -- any request that has
+  # no file extension (e.g. /admin, /browse/roms) is rewritten to /index.html
+  # so React Router can handle it. Requests for files (anything containing a
+  # "." in the last path segment, like /assets/index-abc.js or /favicon.ico)
+  # pass through untouched, so a real missing asset surfaces as 404.
   SpaRewriteFunction:
     Type: AWS::CloudFront::Function
     Properties:
       Name: !Sub "${AWS::StackName}-rewrite"
       AutoPublish: true
       FunctionConfig:
-        Comment: Strip /api prefix and serve index.html for SPA routes
+        Comment: Serve index.html for SPA routes
         Runtime: cloudfront-js-2.0
       FunctionCode: |
         function handler(event) {
           var req = event.request;
           var uri = req.uri;
 
-          // 1) /api/* -> drop the "/api" prefix before forwarding to API Gateway.
-          if (uri.indexOf('/api/') === 0) {
-            req.uri = uri.substring(4);
-            return req;
-          }
-
-          // 2) SPA fallback: if the last path segment has no ".", treat it
-          //    as a virtual route and serve index.html. Real files (which
-          //    always have an extension after Vite's hashed build, e.g.
-          //    /assets/index-abc.js, /favicon.ico) fall through untouched.
           var lastSlash = uri.lastIndexOf('/');
           var lastSegment = uri.substring(lastSlash + 1);
           if (lastSegment.indexOf('.') === -1) {
