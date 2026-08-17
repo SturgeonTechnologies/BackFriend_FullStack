@@ -53,4 +53,4 @@ capabilities = "CAPABILITY_NAMED_IAM"
 s3_bucket = "schuit-sharing-sam-artifacts-587449585882"
 confirm_changeset = true
 fail_on_empty_changeset = false
-parameter_overrides = "Stage=prod FunctionNamePrefix=schuit-sharing-prod-sam SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io ExistingUserPoolId=us-east-1_8Zf0FwRVl ExistingWebClientId=mai2ubk9ca9apj335bth8os2g MobileCallbackUrls=backfriend://auth/callback MobileLogoutUrls=backfriend://signout"
+parameter_overrides = "Stage=prod FunctionNamePrefix=schuit-sharing-prod-sam SharesBucket=schuit-sharing SiteOrigin=https://sharing.schuit.io AllowedOrigins=https://sharing.schuit.io ExistingUserPoolId=us-east-1_8Zf0FwRVl ExistingWebClientId=mai2ubk9ca9apj335bth8os2g MobileCallbackUrls=backfriend://auth/callback MobileLogoutUrls=backfriend://signout CognitoCustomDomain=auth.schuit.io"
