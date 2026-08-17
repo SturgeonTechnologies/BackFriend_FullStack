@@ -35,12 +35,19 @@ function log(msg) {
 
 // On Windows, .cmd shims (sam, npm) can't run via execFileSync without
 // shell:true -- Node can't exec a .bat/.cmd directly (EINVAL), even with the
-// extension resolved explicitly. But shell:true does NOT quote array
-// elements for you (Node warns DEP0190) -- it just concatenates them with
-// spaces -- so any argument containing whitespace (e.g. "AppDisplayName=My
-// Space") would otherwise get split into multiple tokens. Quote those
-// ourselves before the join.
-const NEEDS_SHELL = process.platform === "win32";
+// extension resolved explicitly. aws.exe/node.exe are real executables and
+// never need this. That distinction matters beyond just avoiding an
+// unnecessary shell: cmd.exe treats |, &, <, >, ^ as operators even inside a
+// "quoted" argument, so routing aws through it would mangle any --query
+// JMESPath containing a pipe (e.g. `Foo[?...].Bar | [0]`). For the commands
+// that do need shell:true, shell:true does NOT quote array elements for you
+// (Node warns DEP0190) -- it just concatenates them with spaces -- so any
+// argument containing whitespace (e.g. "AppDisplayName=My Space") would
+// otherwise get split into multiple tokens. Quote those ourselves.
+const SHELL_COMMANDS = new Set(["npm", "sam"]);
+function needsShell(cmd) {
+  return process.platform === "win32" && SHELL_COMMANDS.has(cmd);
+}
 
 function winQuote(arg) {
   return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
@@ -48,13 +55,15 @@ function winQuote(arg) {
 
 function run(cmd, args, opts = {}) {
   console.log(`    $ ${cmd} ${args.join(" ")}`);
-  const finalArgs = NEEDS_SHELL ? args.map(winQuote) : args;
-  execFileSync(cmd, finalArgs, { stdio: "inherit", shell: NEEDS_SHELL, ...opts });
+  const shell = needsShell(cmd);
+  const finalArgs = shell ? args.map(winQuote) : args;
+  execFileSync(cmd, finalArgs, { stdio: "inherit", shell, ...opts });
 }
 
 function runCapture(cmd, args, opts = {}) {
-  const finalArgs = NEEDS_SHELL ? args.map(winQuote) : args;
-  return execFileSync(cmd, finalArgs, { encoding: "utf8", shell: NEEDS_SHELL, ...opts }).trim();
+  const shell = needsShell(cmd);
+  const finalArgs = shell ? args.map(winQuote) : args;
+  return execFileSync(cmd, finalArgs, { encoding: "utf8", shell, ...opts }).trim();
 }
 
 function loadConfig(path) {

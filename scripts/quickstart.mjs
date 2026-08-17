@@ -128,10 +128,19 @@ function toDnsSafeName(input, maxLen = 24) {
   return s || "space";
 }
 
-const NEEDS_SHELL = process.platform === "win32";
+// Only .cmd-shimmed Windows binaries (sam, npm) actually need a shell to
+// invoke -- aws.exe/node.exe run directly. Routing everything through cmd.exe
+// is dangerous anyway: cmd.exe treats |, &, <, >, ^ as operators even inside
+// a "quoted" argument, so any --query JMESPath containing a pipe (extremely
+// common: `Foo[?...].Bar | [0]`) gets torn apart as a real shell pipe.
+const SHELL_COMMANDS = new Set(["npm", "sam"]);
+function needsShell(cmd) {
+  return process.platform === "win32" && SHELL_COMMANDS.has(cmd);
+}
+
 function have(cmd) {
   try {
-    execFileSync(cmd, ["--version"], { stdio: "ignore", shell: NEEDS_SHELL });
+    execFileSync(cmd, ["--version"], { stdio: "ignore", shell: needsShell(cmd) });
     return true;
   } catch {
     return false;
@@ -140,11 +149,11 @@ function have(cmd) {
 
 function run(cmd, args, opts = {}) {
   console.log(`    $ ${cmd} ${args.join(" ")}`);
-  execFileSync(cmd, args, { stdio: "inherit", shell: NEEDS_SHELL, ...opts });
+  execFileSync(cmd, args, { stdio: "inherit", shell: needsShell(cmd), ...opts });
 }
 
 function runQuiet(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: "utf8", shell: NEEDS_SHELL, ...opts });
+  return execFileSync(cmd, args, { encoding: "utf8", shell: needsShell(cmd), ...opts });
 }
 
 function bucketExists(bucket, region) {

@@ -63,13 +63,21 @@ function boolFlag(name) {
   return s === "true" || s === "1" || s === "yes" || s === "y";
 }
 
-const NEEDS_SHELL = process.platform === "win32";
+// Only .cmd-shimmed Windows binaries (sam, npm -- not used here, but kept
+// consistent with quickstart.mjs) need a shell to invoke; aws.exe runs
+// directly. Routing aws through cmd.exe is actively dangerous: cmd.exe
+// treats |, &, <, >, ^ as operators even inside a "quoted" argument, which
+// breaks any --query JMESPath containing a pipe (e.g. `Foo[?...].Bar | [0]`).
+const SHELL_COMMANDS = new Set(["npm", "sam"]);
+function needsShell(cmd) {
+  return process.platform === "win32" && SHELL_COMMANDS.has(cmd);
+}
 function run(cmd, args, opts = {}) {
   console.log(`    $ ${cmd} ${args.join(" ")}`);
-  execFileSync(cmd, args, { stdio: "inherit", shell: NEEDS_SHELL, ...opts });
+  execFileSync(cmd, args, { stdio: "inherit", shell: needsShell(cmd), ...opts });
 }
 function runQuiet(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: "utf8", shell: NEEDS_SHELL, ...opts });
+  return execFileSync(cmd, args, { encoding: "utf8", shell: needsShell(cmd), ...opts });
 }
 async function askYesNo(question, defaultYes = false) {
   const hint = defaultYes ? "Y/n" : "y/N";
