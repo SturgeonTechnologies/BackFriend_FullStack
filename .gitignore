@@ -18,6 +18,11 @@ coverage/
 .env.*.local
 *.pem
 
+# Deploy config (account/domain-specific; commit only the .example template)
+backend/deploy.config*.json
+!backend/deploy.config.example.json
+backend/.deploy-overrides.yaml
+
 # Editors / OS
 .vscode/
 .idea/

@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-# Builds and deploys the SPA to s3://<SITE_BUCKET>/<SITE_PREFIX>/, then
-# invalidates the CloudFront distribution.
+# Frontend-only redeploy: builds and syncs the SPA to s3://<SITE_BUCKET>/<SITE_PREFIX>/,
+# then invalidates the CloudFront distribution -- skipping the backend entirely.
+# For a full deploy (backend + frontend together), use
+# backend/scripts/deploy.mjs instead; this is just a quick way to push a
+# frontend-only change (styling, copy, etc.) without touching the backend.
 #
-# Auto-discovers SiteUploadPath and DistributionId from the
-# `schuit-sharing-frontend` CloudFormation stack.
+# Auto-discovers SiteUploadPath and DistributionId from the frontend's
+# CloudFormation stack (STACK_NAME below -- override if yours differs).
+#
+# Requires .env.local to already have the right VITE_* values for your
+# deployed backend (see .env.example).
 #
 # Usage:
 #   ./scripts/deploy.sh                # uses your default AWS profile
 #   AWS_PROFILE=my-profile ./scripts/deploy.sh
-#   STACK_NAME=schuit-sharing-frontend ./scripts/deploy.sh
+#   STACK_NAME=my-frontend-stack ./scripts/deploy.sh
 
 set -euo pipefail
 
-STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
+STACK_NAME="${STACK_NAME:-rom-hub-frontend}"
 REGION="${AWS_REGION:-us-east-1}"
 
 PROFILE_FLAG=""

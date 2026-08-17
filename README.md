@@ -3,10 +3,15 @@
 An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
 Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
-> **Status:** Live on `schuit-sharing-prod` (the `rom-hub-dev` →
-> `schuit-sharing-prod` cutover completed 2026-07-28; admin is bootstrapped).
-> Only cleanup remains: tear down the dead `rom-hub-dev` / `rom-hub-email`
-> stacks (TODO steps 10–11).
+> **Status:** Live on `schuit-sharing-prod-sam` — the backend runs on **AWS
+> SAM**, not the original Serverless Framework app (that stack was cut over
+> and deleted 2026-08-09; see "Deploy the backend" below). Auth is on a
+> **custom Cognito domain** (`auth.schuit.io`, not the auto-generated
+> `*.amazoncognito.com` one) — see "Custom Cognito domain" below. There's
+> also a **mobile app** (Expo/React Native, `BackFriend_Mobile`) consuming
+> this same backend, which is why it now exposes a public `GET /config`
+> discovery endpoint (used by the app's "add account" flow; the web SPA
+> doesn't need it).
 >
 > SES has **production access** — invite mail sends to any recipient (quota
 > 50k/day). (Email/password *verification* codes use Cognito's own sender,
@@ -44,14 +49,18 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 
 ```
 schuit-sharing/
-├── backend/                      Serverless Framework app (Lambda + API GW + Cognito + DDB + S3)
-│   ├── serverless.yml
+├── backend/                      AWS SAM app (Lambda + API GW + Cognito + DDB + S3)
+│   ├── template.yaml             The SAM template -- source of truth for backend resources
+│   ├── deploy.config.example.json  Template for the one-file deploy config (see below)
+│   ├── scripts/
+│   │   ├── deploy.mjs            One-command deploy: SAM + Cognito wiring + frontend
+│   │   └── wire-cognito-triggers.mjs  Post-deploy Cognito trigger/theme/email wiring
 │   └── src/
 │       ├── lib/                  Shared helpers (auth, DDB, S3, Cognito, mounts, invites, provision)
 │       └── handlers/
 │           ├── triggers/         Cognito triggers (preSignUp, postAuth, preTokenGen)
 │           ├── admin/            Admin-only (invites/access, mounts, explorer, public sharing)
-│           ├── public/           Unauthenticated public-share resolver (/public/{token})
+│           ├── public/           Unauthenticated (public-share resolver, GET /config discovery)
 │           └── user/             Authenticated (mounts, browse, download, upload, delete, search)
 ├── frontend/                     React + Vite SPA
 │   └── src/
@@ -98,10 +107,10 @@ schuit-sharing/
 ## Prereqs
 
 - Node 20, npm
-- AWS CLI configured (for the AWS account that owns `schuit.io` in Route 53)
-- A Google Cloud project for OAuth
-- A Meta for Developers app for Facebook Login (https://developers.facebook.com/)
-- Serverless Framework v3 (`npm i -g serverless`)
+- AWS CLI configured (for the AWS account that owns your domain in Route 53)
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) ≥ 1.163
+- A Google Cloud project for OAuth (optional — skip for email/password-only)
+- A Meta for Developers app for Facebook Login (https://developers.facebook.com/) (optional)
 
 ## 1. Create the OAuth clients (Google + Facebook)
 
@@ -153,31 +162,71 @@ aws ssm put-parameter \
   --value '<facebook-app-secret>'
 ```
 
-The live deployment uses stage `prod`. The `dev` stage is reserved for a future personal sandbox / `serverless offline` use; if you populate `/schuit-sharing/dev/{google,facebook}/...` you can deploy a parallel sandbox stack with `--stage dev`.
+Pick names under whatever prefix you like (`/<your-space-name>/<stage>/...`) — the SSM parameter names are what you point at from `deploy.config.<name>.json`'s `oauth` block, not a fixed convention. `samtest` is a disposable throwaway stage (see "Deploy the backend") that's normally left email/password-only — no need to populate OAuth secrets for it unless you specifically want to test federated sign-in there too.
 
-## 3. Deploy the backend
+## 3. Deploy the backend (and the frontend, in the same step)
+
+One JSON config file drives the whole thing — SAM build+deploy, Cognito
+trigger/hosted-UI-theme/email wiring, and (if you fill in its `frontend`
+block) the SPA build + S3 sync + CloudFront invalidation.
+
+**First time bootstrapping a brand-new space:** the `frontend` block names an
+*already-deployed* CloudFront/S3 stack (step 4, below), which itself needs
+this backend's `ApiEndpoint` output to be created. So on a fresh space, leave
+`frontend` out of the config for your first deploy, do step 4 with the
+`ApiEndpoint` it prints, then add the `frontend` block and re-run
+`deploy.mjs`. Redeploying an existing space, just fill in everything and run
+it once.
 
 ```bash
 cd backend
 npm install
-npx serverless deploy --stage prod
+cp deploy.config.example.json deploy.config.<name>.json   # e.g. deploy.config.prod.json
 ```
 
-Outputs you'll need:
+Fill in `deploy.config.<name>.json` — every field is explained by a
+`$comment*` key right next to it in the example file. The short version:
 
-- `UserPoolId`
-- `UserPoolClientId`
-- `CognitoDomain` — e.g. `https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com`
-- `SharesBucketName` — the bucket the app reads from (default: `schuit-sharing`)
-- `ApiEndpoint` — raw API Gateway URL; you'll need the host portion only
+- `stage` / `stackName` / `functionNamePrefix` / `artifactBucket` — names for
+  this deployment. `artifactBucket` is a plain S3 bucket SAM uploads build
+  artifacts to (`aws s3 mb s3://<name>` once, any region-appropriate name).
+- `sharesBucket` / `siteOrigin` / `allowedOrigins` / `appDisplayName` /
+  `bootstrapAdminEmails` / `mailFrom` — your space's basics. `bootstrapAdminEmails`
+  is who gets auto-promoted to admin on first sign-in — no manual user/group setup needed.
+- `oauth` — omit entirely for email/password-only. When present, only SSM
+  *parameter names* go in the file (see step 2) — the actual secret values
+  are pulled from SSM at deploy time, never written to this file.
+- `adopt` — omit for a brand-new space (this creates a fresh Cognito pool +
+  tables). Only needed if you're pointing a new compute stack at an existing
+  pool (that's what this deployment's own `prod` config does — see "Custom
+  Cognito domain" below for why that matters).
+- `frontend` — omit to deploy backend-only. When present, `distributionStackName`
+  must name an **already-deployed** frontend stack (step 4, below) — this
+  script doesn't create infrastructure, only builds and pushes to it.
 
-**Now go back to both Google Cloud Console and the Facebook app** and add the Cognito callback to their redirect URIs (Google: *Authorized redirect URIs*; Facebook: *Facebook Login → Settings → Valid OAuth Redirect URIs*):
+Then deploy:
+
+```bash
+node scripts/deploy.mjs deploy.config.<name>.json
+```
+
+It's idempotent — re-run it any time you change the config or pull new code.
+Stack outputs (`UserPoolId`, `UserPoolClientId`, `CognitoDomain`, `ApiEndpoint`, …)
+print at the end; you'll want `CognitoDomain` for the next step.
+
+**Now go back to both Google Cloud Console and the Facebook app** (if you
+configured OAuth) and add the Cognito callback to their redirect URIs
+(Google: *Authorized redirect URIs*; Facebook: *Facebook Login → Settings →
+Valid OAuth Redirect URIs*), using the `CognitoDomain` the deploy just
+printed:
 
 ```
-https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
+<CognitoDomain>/oauth2/idpresponse
 ```
 
-The first admin (`riley.schuit@gmail.com`) is bootstrapped automatically — no need to manually create the user or add them to the admins group. The `postAuth` Lambda trigger adds them on first sign-in.
+The admin(s) listed in `bootstrapAdminEmails` are bootstrapped automatically
+on first sign-in — no need to manually create a user or add them to the
+admins group.
 
 ## 4. Deploy the frontend infra (custom domain)
 
@@ -225,7 +274,7 @@ Or run it manually:
 
 ```bash
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
-API_HOST=abc123def.execute-api.us-east-1.amazonaws.com   # from serverless outputs
+API_HOST=abc123def.execute-api.us-east-1.amazonaws.com   # backend deploy's ApiEndpoint output, host only (no https://)
 
 aws cloudformation deploy \
   --region us-east-1 \
@@ -329,14 +378,15 @@ usually granted within 24h):
 After production access is granted, sandbox restrictions disappear and
 the backend can email any invitee.
 
-### Redeploy backend so MAIL_FROM lands
+### Redeploy so MAIL_FROM lands
 
-`backend/serverless.yml` now sets `MAIL_FROM=noreply@schuit.io`,
-`MAIL_REGION=us-east-1`, and grants Lambdas `ses:SendEmail`. Redeploy:
+`backend/template.yaml`'s Lambdas are granted `ses:SendEmail`, and `mailFrom`
+in your `deploy.config.<name>.json` sets `MAIL_FROM`/`MAIL_REGION` (also used
+as the Cognito verification-email sender — see step 3). Redeploy:
 
 ```bash
 cd backend
-npx serverless deploy --stage dev
+node scripts/deploy.mjs deploy.config.<name>.json
 ```
 
 That's it — the **Invite a user** form on `/admin` now sends an email by
@@ -344,38 +394,86 @@ default. If SES rejects the send (sandbox: unverified recipient, identity
 not yet DKIM-verified, throttled), the invite row is still written and
 the form shows the `signupUrl` so you can copy/paste it manually.
 
-## 5. Build & upload the frontend
+(This is exactly what `deploy.mjs`'s `frontend` block automates — see step 3.
+The `frontend/.env.local` route is still there for **local dev** against
+`npm run dev`, not for deploying; see "Local development" below.)
 
-```bash
-cd frontend
-cp .env.example .env.local
-```
+## Custom Cognito domain (optional)
 
-Fill in `.env.local`:
+By default Cognito's Hosted UI lives at an auto-generated
+`<stackname>.auth.<region>.amazoncognito.com` domain — functional, but it
+reads as an unfamiliar/untrusted address to real users on the sign-in screen.
+Mapping it to something under your own domain (e.g. `auth.your-domain.example`)
+fixes that. This is a **one-time, manual** step — not part of `deploy.mjs`,
+because it needs a domain only you control and briefly interrupts sign-in
+for *everyone* while it's mid-flight (see the downtime note below), so it
+shouldn't happen as a side effect of a routine redeploy.
 
-```
-VITE_API_BASE=https://sharing.schuit.io/api
-VITE_USER_POOL_CLIENT_ID=<UserPoolClientId>
-VITE_COGNITO_DOMAIN=https://schuit-sharing-prod-<acct>.auth.us-east-1.amazoncognito.com
-VITE_REDIRECT_URI=https://sharing.schuit.io/auth/callback
-VITE_LOGOUT_REDIRECT=https://sharing.schuit.io/
-```
+A Cognito user pool has exactly **one** domain at a time — switching means
+deleting the old one and creating the new one, with a real gap in between
+(the new domain's CloudFront distribution typically takes 15–60 min to go
+live). Do this when it's fine for sign-in to be briefly unavailable.
 
-Then build and sync:
+1. **Request an ACM cert** for your chosen subdomain, **in `us-east-1`**
+   regardless of where your stack runs (Cognito custom domains are always
+   served via CloudFront):
+   ```bash
+   aws acm request-certificate --domain-name auth.your-domain.example \
+     --validation-method DNS --region us-east-1
+   ```
+   Add the DNS validation CNAME it gives you (`aws acm describe-certificate
+   --certificate-arn <arn> --region us-east-1 --query
+   "Certificate.DomainValidationOptions[0].ResourceRecord"`) to your hosted
+   zone, then wait for `Status` to become `ISSUED`.
 
-```bash
-npm install
-npm run build
+2. **Gotcha:** Cognito requires your domain's *parent* to already resolve
+   (have an A record) before it'll create a subdomain custom domain — even
+   though the record isn't otherwise related to Cognito at all. If your
+   apex domain has no A record yet, add one (e.g. alias it to any
+   CloudFront distribution you already have, like your frontend's) before
+   the next step, or `create-user-pool-domain` fails with "Was not able to
+   resolve a DNS A record for the parent domain."
 
-aws s3 sync dist/ s3://schuit-sharing/web/ --delete
-aws cloudfront create-invalidation \
-  --distribution-id <DistributionId> \
-  --paths "/*"
-```
+3. **Swap the domain** (this is the disruptive step):
+   ```bash
+   aws cognito-idp delete-user-pool-domain --domain <old-domain-prefix> --user-pool-id <pool-id>
+   aws cognito-idp create-user-pool-domain --domain auth.your-domain.example \
+     --user-pool-id <pool-id> \
+     --custom-domain-config CertificateArn=<the-acm-cert-arn>
+   ```
+   The create call returns a `CloudFrontDomain` (e.g. `d123abc.cloudfront.net`)
+   — alias your subdomain to it. The Route 53 alias-target hosted zone ID for
+   *any* CloudFront distribution is always the constant `Z2FDTNDATAQYW2`:
+   ```bash
+   aws route53 change-resource-record-sets --hosted-zone-id <your-zone-id> --change-batch '{
+     "Changes": [{
+       "Action": "UPSERT",
+       "ResourceRecordSet": {
+         "Name": "auth.your-domain.example.",
+         "Type": "A",
+         "AliasTarget": { "HostedZoneId": "Z2FDTNDATAQYW2", "DNSName": "<CloudFrontDomain>.", "EvaluateTargetHealth": false }
+       }
+     }]
+   }'
+   ```
+   Poll `aws cognito-idp describe-user-pool-domain --domain auth.your-domain.example`
+   until `Status` is `ACTIVE`.
 
-The `--delete` flag will remove objects under `web/` that aren't in the new build. Because the OAC is scoped to `web/*`, this only touches the SPA — `Video_Game_ROMs/` and other shared content are untouched.
+4. **Point the backend at it**: set `cognitoCustomDomain` in your
+   `deploy.config.<name>.json` to the new domain and redeploy — this updates
+   `GET /config` (for the mobile app) and the `CognitoDomain` stack output
+   (for the frontend build).
 
-## 6. First sign-in + configure the `/roms` mount
+5. **Rebuild + redeploy the frontend** — its bundle has the *old* domain
+   baked in from the last build and won't pick up the new one just because
+   the backend redeployed (see step 3's `frontend` block).
+
+6. **Update Google/Facebook redirect URIs**: Cognito sends `<new-domain>/oauth2/idpresponse`
+   as the callback to each IdP now, not the old domain — add that URL in
+   both consoles (see step 1) or federated sign-in breaks. Email/password
+   sign-in is unaffected (no external IdP redirect involved).
+
+## 5. First sign-in + configure a mount
 
 1. Open https://sharing.schuit.io
 2. Click **Sign in with Google** → pick `riley.schuit@gmail.com`
@@ -388,7 +486,7 @@ The `--delete` flag will remove objects under `web/` that aren't in the new buil
 5. Click **Add mount**.
 6. Head back to Home → click **Video Game ROMs** → browse and download.
 
-## 7. Inviting another user
+## 6. Inviting another user
 
 In Admin → **Invite a user**:
 
@@ -411,11 +509,14 @@ marks the invite redeemed.
 ## Local development
 
 ```bash
-# Backend: deploy to dev stage as above.
+# Backend: deploy your samtest (or other dev) stage as in step 3.
 # Frontend:
 cd frontend
 cp .env.example .env.local
-# Set VITE_API_BASE to the raw API Gateway URL (ends in /dev)
+# Set VITE_API_BASE to the raw ApiEndpoint output (no trailing /api -- that
+# prefix only exists behind the CloudFront distribution, not talking to API
+# Gateway directly)
+# Set VITE_USER_POOL_CLIENT_ID / VITE_COGNITO_DOMAIN to that stack's outputs
 # Set VITE_REDIRECT_URI to http://localhost:5173/auth/callback
 # Set VITE_LOGOUT_REDIRECT to http://localhost:5173/
 
@@ -424,36 +525,43 @@ npm run dev
 ```
 
 Add `http://localhost:5173/auth/callback` to:
-- the Cognito User Pool Client's **Callback URLs** (already included by `serverless.yml`)
+- the Cognito User Pool Client's **Callback URLs** (already included by `template.yaml`'s `webCallbackUrls` default)
 - the Google OAuth client's and Facebook app's authorized redirect URIs (optional — only if you want to test the full Google/Facebook → Cognito → app flow against a dev Cognito domain)
 
 ## Continuous deployment (GitHub Actions)
 
 Pushes to `main` deploy to prod via `.github/workflows/deploy.yml` — no
-long-lived AWS keys (GitHub OIDC → a scoped IAM role). The workflow deploys the
-backend (`serverless deploy` + `wire-triggers`), reads the stack outputs, builds
-the SPA against them, syncs to `s3://schuit-sharing/web/`, and invalidates
-CloudFront.
+long-lived AWS keys (GitHub OIDC → a scoped IAM role). The workflow writes a
+repo secret's contents to `backend/deploy.config.json` (the file itself is
+gitignored — see step 3) and runs `node scripts/deploy.mjs deploy.config.json`,
+which does everything: SAM build+deploy, Cognito wiring, and the frontend
+build+sync+invalidation.
 
-**One-time setup** — create the deploy role (this is the only step that needs
-your hands, since it grants deploy access):
+**One-time setup:**
 
-```bash
-aws cloudformation deploy \
-  --region us-east-1 \
-  --stack-name schuit-sharing-gha \
-  --template-file infrastructure/github-oidc.yml \
-  --capabilities CAPABILITY_NAMED_IAM
-```
+1. Create the deploy role (the only step needing your hands, since it grants deploy access):
+   ```bash
+   aws cloudformation deploy \
+     --region us-east-1 \
+     --stack-name schuit-sharing-gha \
+     --template-file infrastructure/github-oidc.yml \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
+2. Add a repo secret named `DEPLOY_CONFIG_PROD` containing your real
+   `deploy.config.<name>.json` file's full contents (secrets that need
+   real OAuth client secrets pulled from SSM still work fine — the deploy
+   role just needs `ssm:GetParameter` on those paths, which it already has).
 
-That creates `schuit-sharing-gha-deploy`, trusted only by
-`SturgeonTechnologies/schuit-sharing` on `main` (via the account's existing
-GitHub OIDC provider). The workflow already references this role ARN. After the
-role exists, push to `main` (or run the workflow manually from the Actions tab).
+The CloudFormation deploy above creates `schuit-sharing-gha-deploy`, trusted
+only by `SturgeonTechnologies/schuit-sharing` on `main` (via the account's
+existing GitHub OIDC provider). The workflow already references this role
+ARN — update it in `deploy.yml` if you fork this under a different repo.
+After the role exists and the secret's set, push to `main` (or run the
+workflow manually from the Actions tab).
 
 > The role's policy is scoped by resource for S3/IAM/SSM/CloudFront/DynamoDB but
 > broad (service-level) for CloudFormation/Lambda/API Gateway/Cognito, which are
-> hard to resource-scope for a `serverless deploy`. Tighten later if desired.
+> hard to resource-scope for a SAM deploy. Tighten later if desired.
 >
 > The bucket's Public Access Block + CORS are set out-of-band and are **not**
 > touched by CI. First-ever admin bootstrap (a real sign-in) also can't be done

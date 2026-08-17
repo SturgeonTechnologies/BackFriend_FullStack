@@ -19,8 +19,6 @@ env:
   # Matches the role created by infrastructure/github-oidc.yml. If you renamed
   # it, update this ARN.
   DEPLOY_ROLE_ARN: arn:aws:iam::587449585882:role/schuit-sharing-gha-deploy
-  SHARES_BUCKET: schuit-sharing
-  DISTRIBUTION_ID: E26FQPCAP5752P
 
 jobs:
   deploy:
@@ -30,6 +28,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - uses: aws-actions/setup-sam@v2
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -37,48 +36,20 @@ jobs:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ---------- Backend ----------
       - name: Backend install
         working-directory: backend
         run: npm ci
 
-      - name: Deploy backend
+      # deploy.config.json is gitignored (account-specific -- see
+      # deploy.config.example.json for the shape) and supplied here from a
+      # repo secret so it never lands in the repo itself.
+      - name: Write deploy config
         working-directory: backend
-        run: npx serverless deploy --stage prod
+        run: echo '${{ secrets.DEPLOY_CONFIG_PROD }}' > deploy.config.json
 
-      - name: Wire Cognito triggers + hosted-UI theme
+      # One script: SAM build+deploy, Cognito trigger/theme/email wiring,
+      # and the frontend build+S3 sync+CloudFront invalidation (it runs its
+      # own `npm ci` for frontend/ when the config's "frontend" block is set).
+      - name: Deploy backend + frontend
         working-directory: backend
-        run: STAGE=prod node scripts/wire-cognito-triggers.mjs
-
-      # ---------- Frontend ----------
-      - name: Read backend stack outputs
-        id: outputs
-        run: |
-          CLIENT_ID=$(aws cloudformation describe-stacks --stack-name schuit-sharing-prod \
-            --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" --output text)
-          COGNITO_DOMAIN=$(aws cloudformation describe-stacks --stack-name schuit-sharing-prod \
-            --query "Stacks[0].Outputs[?OutputKey=='CognitoDomain'].OutputValue" --output text)
-          echo "client_id=$CLIENT_ID" >> "$GITHUB_OUTPUT"
-          echo "cognito_domain=$COGNITO_DOMAIN" >> "$GITHUB_OUTPUT"
-
-      - name: Frontend install
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        env:
-          VITE_API_BASE: /api
-          VITE_USER_POOL_CLIENT_ID: ${{ steps.outputs.outputs.client_id }}
-          VITE_COGNITO_DOMAIN: ${{ steps.outputs.outputs.cognito_domain }}
-          VITE_REDIRECT_URI: https://sharing.schuit.io/auth/callback
-          VITE_LOGOUT_REDIRECT: https://sharing.schuit.io/
-          VITE_APP_TITLE: Schuit Sharing
-        run: npm run build
-
-      - name: Sync SPA to S3
-        working-directory: frontend
-        run: aws s3 sync dist/ "s3://${SHARES_BUCKET}/web/" --delete
-
-      - name: Invalidate CloudFront
-        run: aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"
+        run: node scripts/deploy.mjs deploy.config.json

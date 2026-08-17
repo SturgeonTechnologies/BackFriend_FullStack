@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Wires the PreSignUp + PostAuthentication Cognito Lambda triggers onto the
-// UserPool created by `serverless deploy`.
+// Wires the PreSignUp/PostAuthentication/PreTokenGeneration Cognito Lambda
+// triggers onto the UserPool, applies the hosted-UI dark theme to every app
+// client, and points Cognito's own email (verification/recovery) through SES.
 //
-// Why this is a separate script: putting `LambdaConfig` directly on the
-// AWS::Cognito::UserPool resource creates a circular dependency in
-// CloudFormation when the same UserPool is also used as the HTTP API
-// authorizer. Doing the wiring after deploy breaks the cycle.
+// Why this is a separate step from `sam deploy`: putting `LambdaConfig`
+// directly on the AWS::Cognito::UserPool resource creates a circular
+// dependency in CloudFormation when the same UserPool is also used as the
+// HTTP API authorizer. Doing the wiring after deploy breaks the cycle.
+// SetUICustomization also has no CloudFormation resource at all.
 //
-// Idempotent — safe to run after every deploy.
+// Idempotent — safe to run after every deploy. Exports wireCognito() for
+// scripts/deploy.mjs to call in-process; also runnable standalone:
 //
-// Usage:
-//   node scripts/wire-cognito-triggers.mjs                  # stage=dev
-//   STAGE=prod node scripts/wire-cognito-triggers.mjs
+//   STACK_NAME=schuit-sharing-prod-sam FUNCTION_PREFIX=schuit-sharing-prod-sam \
+//     node scripts/wire-cognito-triggers.mjs
 //   AWS_PROFILE=my-profile STAGE=dev node scripts/wire-cognito-triggers.mjs
 
 import {
@@ -24,6 +26,10 @@ import {
   UpdateUserPoolCommand,
   SetUICustomizationCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import {
+  LambdaClient,
+  GetFunctionCommand,
+} from "@aws-sdk/client-lambda";
 
 // Dark theme for the classic hosted UI, matching the SPA palette. Classic
 // hosted UI only styles the card/inputs/buttons (not the page body), so the
@@ -78,45 +84,41 @@ const HOSTED_UI_CSS = `.background-customizable {
   border: 1px solid #ff5b5b;
   color: #ff5b5b;
 }`;
-import {
-  LambdaClient,
-  GetFunctionCommand,
-} from "@aws-sdk/client-lambda";
 
-const STAGE = process.env.STAGE || "dev";
-const REGION = process.env.AWS_REGION || "us-east-1";
-const SERVICE = "schuit-sharing";
-// STACK_NAME + FUNCTION_PREFIX are overridable so this works for both the
-// Serverless stack (schuit-sharing-<stage>) and the SAM adopt stack
-// (STACK_NAME=schuit-sharing-prod-sam, FUNCTION_PREFIX=schuit-sharing-prod-sam).
-const STACK_NAME = process.env.STACK_NAME || `${SERVICE}-${STAGE}`;
-const FUNCTION_PREFIX = process.env.FUNCTION_PREFIX || `${SERVICE}-${STAGE}`;
+/**
+ * @param {object} opts
+ * @param {string} opts.stackName    The deployed SAM stack (e.g. schuit-sharing-prod-sam).
+ * @param {string} [opts.region]     Defaults to AWS_REGION env or us-east-1.
+ * @param {string} opts.functionPrefix  Must match the stack's FunctionNamePrefix param.
+ * @param {string} [opts.emailFrom]  "Display Name <noreply@yourdomain>". Defaults to a placeholder.
+ * @param {string} [opts.sesSourceArn]  Defaults to arn:aws:ses:<region>:<acct>:identity/<domain-from-emailFrom>.
+ */
+export async function wireCognito({ stackName, region, functionPrefix, emailFrom, sesSourceArn }) {
+  const REGION = region || process.env.AWS_REGION || "us-east-1";
+  const cfn = new CloudFormationClient({ region: REGION });
+  const cognito = new CognitoIdentityProviderClient({ region: REGION });
+  const lambda = new LambdaClient({ region: REGION });
 
-const cfn = new CloudFormationClient({ region: REGION });
-const cognito = new CognitoIdentityProviderClient({ region: REGION });
-const lambda = new LambdaClient({ region: REGION });
+  async function getStackOutput(key) {
+    const res = await cfn.send(new DescribeStacksCommand({ StackName: stackName }));
+    const stack = res.Stacks?.[0];
+    if (!stack) throw new Error(`Stack ${stackName} not found`);
+    const out = stack.Outputs?.find((o) => o.OutputKey === key);
+    if (!out?.OutputValue) throw new Error(`Output ${key} missing on stack ${stackName}`);
+    return out.OutputValue;
+  }
 
-async function getStackOutput(key) {
-  const res = await cfn.send(new DescribeStacksCommand({ StackName: STACK_NAME }));
-  const stack = res.Stacks?.[0];
-  if (!stack) throw new Error(`Stack ${STACK_NAME} not found`);
-  const out = stack.Outputs?.find((o) => o.OutputKey === key);
-  if (!out?.OutputValue) throw new Error(`Output ${key} missing on stack ${STACK_NAME}`);
-  return out.OutputValue;
-}
+  async function getFunctionArn(name) {
+    const res = await lambda.send(new GetFunctionCommand({ FunctionName: name }));
+    if (!res.Configuration?.FunctionArn) throw new Error(`Lambda ${name} not found`);
+    return res.Configuration.FunctionArn;
+  }
 
-async function getFunctionArn(name) {
-  const res = await lambda.send(new GetFunctionCommand({ FunctionName: name }));
-  if (!res.Configuration?.FunctionArn) throw new Error(`Lambda ${name} not found`);
-  return res.Configuration.FunctionArn;
-}
-
-async function main() {
-  console.log(`==> Looking up resources from stack ${STACK_NAME} in ${REGION}`);
+  console.log(`==> Looking up resources from stack ${stackName} in ${REGION}`);
   const userPoolId = await getStackOutput("UserPoolId");
-  const preSignUpArn = await getFunctionArn(`${FUNCTION_PREFIX}-preSignUp`);
-  const postAuthArn = await getFunctionArn(`${FUNCTION_PREFIX}-postAuth`);
-  const preTokenGenArn = await getFunctionArn(`${FUNCTION_PREFIX}-preTokenGen`);
+  const preSignUpArn = await getFunctionArn(`${functionPrefix}-preSignUp`);
+  const postAuthArn = await getFunctionArn(`${functionPrefix}-postAuth`);
+  const preTokenGenArn = await getFunctionArn(`${functionPrefix}-preTokenGen`);
   console.log(`    UserPoolId       = ${userPoolId}`);
   console.log(`    PreSignUp ARN    = ${preSignUpArn}`);
   console.log(`    PostAuth ARN     = ${postAuthArn}`);
@@ -126,8 +128,7 @@ async function main() {
   // idempotency short-circuit below so it always runs on re-invocation.
   // SetUICustomization is scoped per (UserPoolId, ClientId) — it does NOT
   // apply to every app client, so every client whose hosted UI a human sees
-  // needs its own call. (This is why the mobile client was rendering
-  // Cognito's stock/unstyled UI even after the web client got themed.)
+  // needs its own call (web client + mobile client both).
   const clientId = await getStackOutput("UserPoolClientId");
   const mobileClientId = await getStackOutput("UserPoolClientMobileId");
   console.log("==> Applying hosted-UI customization (dark theme) to web + mobile clients");
@@ -164,12 +165,12 @@ async function main() {
   // COGNITO_DEFAULT sender is throttled (~50/day) and unreliable, so native
   // sign-up codes and forgot-password emails silently fail to deliver.
   const accountId = preSignUpArn.split(":")[4];
+  const resolvedEmailFrom = emailFrom || process.env.COGNITO_EMAIL_FROM || "Sharing App <noreply@example.com>";
+  const emailDomain = resolvedEmailFrom.replace(/^.*<([^>]+)>\s*$/, "$1").split("@")[1];
   const desiredEmailConfiguration = {
     EmailSendingAccount: "DEVELOPER",
-    From: process.env.COGNITO_EMAIL_FROM || "Schuit Sharing <noreply@schuit.io>",
-    SourceArn:
-      process.env.SES_SOURCE_ARN ||
-      `arn:aws:ses:${REGION}:${accountId}:identity/schuit.io`,
+    From: resolvedEmailFrom,
+    SourceArn: sesSourceArn || process.env.SES_SOURCE_ARN || `arn:aws:ses:${REGION}:${accountId}:identity/${emailDomain}`,
   };
 
   // Idempotency: skip only if BOTH the triggers and the email config are correct.
@@ -191,7 +192,7 @@ async function main() {
   // UpdateUserPool resets fields you don't pass back, so we re-pass everything
   // that was on the pool (skipping immutable fields like UsernameAttributes
   // and Schema, which UpdateUserPool rejects).
-  console.log("==> Updating UserPool with new LambdaConfig");
+  console.log("==> Updating UserPool with new LambdaConfig + EmailConfiguration");
   await cognito.send(
     new UpdateUserPoolCommand({
       UserPoolId: userPoolId,
@@ -219,7 +220,15 @@ async function main() {
   console.log(`    PreTokenGeneration: ${preTokenGenArn}`);
 }
 
-main().catch((err) => {
-  console.error("ERROR:", err?.message || err);
-  process.exit(1);
-});
+// Standalone CLI usage — unchanged interface, now delegating to wireCognito().
+const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`;
+if (isMain) {
+  const STAGE = process.env.STAGE || "dev";
+  const SERVICE = "schuit-sharing";
+  const stackName = process.env.STACK_NAME || `${SERVICE}-${STAGE}`;
+  const functionPrefix = process.env.FUNCTION_PREFIX || `${SERVICE}-${STAGE}`;
+  wireCognito({ stackName, functionPrefix }).catch((err) => {
+    console.error("ERROR:", err?.message || err);
+    process.exit(1);
+  });
+}

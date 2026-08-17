@@ -1,0 +1,51 @@
+{
+  "$comment": "Copy this to deploy.config.<name>.json (gitignored) and fill in your own values, then: node scripts/deploy.mjs deploy.config.<name>.json",
+
+  "stage": "prod",
+  "region": "us-east-1",
+  "stackName": "your-space-name-sam",
+  "functionNamePrefix": "your-space-name-sam",
+  "artifactBucket": "your-space-name-sam-artifacts-<your-aws-account-id>",
+
+  "sharesBucket": "your-space-name",
+  "siteOrigin": "https://your-domain.example",
+  "allowedOrigins": ["https://your-domain.example"],
+  "appDisplayName": "My Sharing Space",
+
+  "bootstrapAdminEmails": ["you@example.com"],
+  "mailFrom": "noreply@your-domain.example",
+  "mailRegion": "us-east-1",
+
+  "webCallbackUrls": ["http://localhost:5173/auth/callback", "https://your-domain.example/auth/callback"],
+  "webLogoutUrls": ["http://localhost:5173/", "https://your-domain.example/"],
+  "mobileCallbackUrls": ["backfriend://auth/callback"],
+  "mobileLogoutUrls": ["backfriend://signout"],
+
+  "$comment_adopt": "Omit the whole 'adopt' block for a brand-new space (fresh Cognito pool + tables). Only set it if you're pointing this stack at an EXISTING pool (see README 'Adopt mode').",
+  "adopt": {
+    "existingUserPoolId": "",
+    "existingWebClientId": "",
+    "mobileIdentityProviders": ["COGNITO"]
+  },
+
+  "$comment_oauth": "Omit 'google'/'facebook' entirely for email/password-only sign-in. When present, the actual client secret is pulled from SSM at deploy time -- never put a secret value directly in this file. See README step 2 for creating these SSM parameters.",
+  "oauth": {
+    "google": {
+      "clientIdSsmParam": "/your-space-name/prod/google/client_id",
+      "clientSecretSsmParam": "/your-space-name/prod/google/client_secret"
+    },
+    "facebook": {
+      "clientIdSsmParam": "/your-space-name/prod/facebook/client_id",
+      "clientSecretSsmParam": "/your-space-name/prod/facebook/client_secret"
+    }
+  },
+
+  "$comment_frontend": "Omit entirely to only deploy the backend. When present, builds the SPA and syncs it to the S3/CloudFront infra named by distributionStackName (see README 'Deploy the frontend infra' -- must already exist).",
+  "frontend": {
+    "distributionStackName": "your-space-name-frontend",
+    "apiBase": "/api",
+    "redirectUri": "https://your-domain.example/auth/callback",
+    "logoutRedirect": "https://your-domain.example/",
+    "appTitle": "My Sharing Space"
+  }
+}
