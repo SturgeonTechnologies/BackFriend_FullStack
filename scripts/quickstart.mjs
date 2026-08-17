@@ -184,7 +184,12 @@ async function main() {
 
   if (await askYesNo("\nRun the deploy now? (sam build + deploy, Cognito wiring)", true)) {
     console.log();
-    run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: resolve(REPO_ROOT, "backend") });
+    const backendDir = resolve(REPO_ROOT, "backend");
+    if (!existsSync(resolve(backendDir, "node_modules"))) {
+      console.log("==> Installing backend dependencies (first run)");
+      run("npm", ["install"], { cwd: backendDir });
+    }
+    run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
   } else {
     console.log(`\nWhen you're ready: cd backend && node scripts/deploy.mjs deploy.config.${spaceName}.json`);
   }
