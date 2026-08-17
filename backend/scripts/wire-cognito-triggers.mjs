@@ -36,21 +36,21 @@ const HOSTED_UI_CSS = `.background-customizable {
   background-color: #171a21;
 }
 .label-customizable {
-  color: #8a93a4;
+  color: #ffffff;
 }
 .textDescription-customizable {
-  color: #8a93a4;
+  color: #ffffff;
 }
 .idpDescription-customizable {
-  color: #8a93a4;
+  color: #ffffff;
 }
 .legalText-customizable {
-  color: #8a93a4;
+  color: #ffffff;
 }
 .inputField-customizable {
-  background-color: #1d222b;
-  border: 1px solid #262c38;
-  color: #e8eaf0;
+  background-color: #3a4150;
+  border: 1px solid #4a5262;
+  color: #ffffff;
 }
 .inputField-customizable:focus {
   border-color: #4f8cff;
@@ -124,10 +124,17 @@ async function main() {
 
   // Apply the hosted-UI dark theme (idempotent). Done before the LambdaConfig
   // idempotency short-circuit below so it always runs on re-invocation.
+  // SetUICustomization is scoped per (UserPoolId, ClientId) — it does NOT
+  // apply to every app client, so every client whose hosted UI a human sees
+  // needs its own call. (This is why the mobile client was rendering
+  // Cognito's stock/unstyled UI even after the web client got themed.)
   const clientId = await getStackOutput("UserPoolClientId");
-  console.log("==> Applying hosted-UI customization (dark theme)");
-  await cognito.send(
-    new SetUICustomizationCommand({ UserPoolId: userPoolId, ClientId: clientId, CSS: HOSTED_UI_CSS }),
+  const mobileClientId = await getStackOutput("UserPoolClientMobileId");
+  console.log("==> Applying hosted-UI customization (dark theme) to web + mobile clients");
+  await Promise.all(
+    [clientId, mobileClientId].map((id) =>
+      cognito.send(new SetUICustomizationCommand({ UserPoolId: userPoolId, ClientId: id, CSS: HOSTED_UI_CSS })),
+    ),
   );
 
   console.log("==> Fetching current UserPool config");
