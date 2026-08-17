@@ -192,27 +192,48 @@ export async function wireCognito({ stackName, region, functionPrefix, emailFrom
   // UpdateUserPool resets fields you don't pass back, so we re-pass everything
   // that was on the pool (skipping immutable fields like UsernameAttributes
   // and Schema, which UpdateUserPool rejects).
+  //
+  // Cognito validates the WHOLE request atomically -- if the SES identity for
+  // MailFrom's domain isn't verified yet, EmailConfiguration alone fails the
+  // call and LambdaConfig (the triggers -- invite-gating, admin bootstrap)
+  // never gets applied either, even though that part had nothing wrong with
+  // it. Try the full update first; if it's specifically the SES identity
+  // that's the problem, retry with the pool's EXISTING EmailConfiguration
+  // (Cognito's own limited default sender) so the triggers still land, and
+  // tell the user clearly what's still broken instead of failing opaquely.
+  const baseUpdate = {
+    UserPoolId: userPoolId,
+    LambdaConfig: desiredLambdaConfig,
+    Policies: pool.Policies,
+    AutoVerifiedAttributes: pool.AutoVerifiedAttributes,
+    MfaConfiguration: pool.MfaConfiguration,
+    AdminCreateUserConfig: pool.AdminCreateUserConfig,
+    EmailVerificationMessage: pool.EmailVerificationMessage,
+    EmailVerificationSubject: pool.EmailVerificationSubject,
+    VerificationMessageTemplate: pool.VerificationMessageTemplate,
+    SmsConfiguration: pool.SmsConfiguration,
+    SmsAuthenticationMessage: pool.SmsAuthenticationMessage,
+    DeviceConfiguration: pool.DeviceConfiguration,
+    AccountRecoverySetting: pool.AccountRecoverySetting,
+    UserPoolAddOns: pool.UserPoolAddOns,
+    UserPoolTags: pool.UserPoolTags,
+  };
+
   console.log("==> Updating UserPool with new LambdaConfig + EmailConfiguration");
-  await cognito.send(
-    new UpdateUserPoolCommand({
-      UserPoolId: userPoolId,
-      LambdaConfig: desiredLambdaConfig,
-      Policies: pool.Policies,
-      AutoVerifiedAttributes: pool.AutoVerifiedAttributes,
-      MfaConfiguration: pool.MfaConfiguration,
-      AdminCreateUserConfig: pool.AdminCreateUserConfig,
-      EmailVerificationMessage: pool.EmailVerificationMessage,
-      EmailVerificationSubject: pool.EmailVerificationSubject,
-      VerificationMessageTemplate: pool.VerificationMessageTemplate,
-      EmailConfiguration: desiredEmailConfiguration,
-      SmsConfiguration: pool.SmsConfiguration,
-      SmsAuthenticationMessage: pool.SmsAuthenticationMessage,
-      DeviceConfiguration: pool.DeviceConfiguration,
-      AccountRecoverySetting: pool.AccountRecoverySetting,
-      UserPoolAddOns: pool.UserPoolAddOns,
-      UserPoolTags: pool.UserPoolTags,
-    }),
-  );
+  try {
+    await cognito.send(
+      new UpdateUserPoolCommand({ ...baseUpdate, EmailConfiguration: desiredEmailConfiguration }),
+    );
+  } catch (err) {
+    const msg = err?.message || "";
+    if (!/ses|not verified|identity/i.test(msg)) throw err;
+    console.warn(`\n!! SES email config rejected: ${msg}`);
+    console.warn(`!! Verify the SES identity for "${desiredEmailConfiguration.SourceArn}" (see README`);
+    console.warn(`!! step 4b), then re-run this deploy. Wiring triggers now WITHOUT changing email`);
+    console.warn(`!! config -- Cognito's own limited default sender stays in place meanwhile, so`);
+    console.warn(`!! sign-up verification codes / forgot-password emails may not reach real inboxes yet.\n`);
+    await cognito.send(new UpdateUserPoolCommand({ ...baseUpdate, EmailConfiguration: pool.EmailConfiguration }));
+  }
 
   console.log("==> Done. Triggers are now wired:");
   console.log(`    PreSignUp:          ${preSignUpArn}`);
