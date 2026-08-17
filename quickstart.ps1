@@ -10,7 +10,7 @@
 $ErrorActionPreference = "Stop"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Error "node not found on PATH. See README.md `"Prereqs`"."
+    Write-Error "node not found on PATH. See README.md `"Requirements`"."
     exit 1
 }
 

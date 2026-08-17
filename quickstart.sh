@@ -11,7 +11,7 @@
 set -euo pipefail
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "ERROR: node not found on PATH. See README.md \"Prereqs\"." >&2
+  echo "ERROR: node not found on PATH. See README.md \"Requirements\"." >&2
   exit 1
 fi
 

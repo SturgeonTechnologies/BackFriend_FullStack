@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // Guided setup for a new schuit-sharing deployment. Walks through creating
-// backend/deploy.config.<name>.json and (optionally) running the deploy.
+// backend/deploy.config.<name>.json and (optionally) running the deploy,
+// then (if you gave a domain) offers to deploy the frontend hosting stack
+// (README step 4) and the SES email stack (README step 4b) too.
 //
-// This is a CONVENIENCE WRAPPER around README.md's numbered steps 1-3, not a
-// replacement for them -- it automates the repetitive/mechanical parts
-// (bucket creation, SSM parameter writes, assembling the JSON config) but
-// skips the genuinely manual bits (creating OAuth clients in Google/Facebook's
-// own consoles, custom domains, SES) on purpose, since those need real human
-// judgment or a domain/console only you control. See README.md for exactly
+// This is a CONVENIENCE WRAPPER around README.md's numbered steps 1-4b, not
+// a replacement for them -- it automates the repetitive/mechanical parts
+// (bucket creation, SSM parameter writes, assembling the JSON config, the
+// CloudFormation deploys for steps 4/4b) but skips the genuinely manual bits
+// (creating OAuth clients in Google/Facebook's own consoles, and custom
+// domains for the API/Cognito Hosted UI) on purpose, since those need real
+// human judgment or a console only you control, and the Cognito custom
+// domain swap is disruptive to sign-in besides. See README.md for exactly
 // what each step does and the raw commands, in case something here doesn't
 // fit your setup or you'd rather run it by hand.
 //
@@ -73,21 +77,46 @@ function createBucket(bucket, region) {
   run("aws", args);
 }
 
+function hostedZoneIdFor(parentZone) {
+  const out = runQuiet("aws", [
+    "route53", "list-hosted-zones-by-name",
+    "--dns-name", parentZone,
+    "--query", `HostedZones[?Name=='${parentZone}.'].Id | [0]`,
+    "--output", "text",
+  ]).trim();
+  return out && out !== "None" ? out.replace("/hostedzone/", "") : null;
+}
+
+function cfnDeploy(stackName, templateFile, region, params) {
+  run("aws", [
+    "cloudformation", "deploy",
+    "--region", region,
+    "--stack-name", stackName,
+    "--template-file", resolve(REPO_ROOT, "infrastructure", templateFile),
+    "--parameter-overrides",
+    ...Object.entries(params).map(([k, v]) => `${k}=${v}`),
+    "--capabilities", "CAPABILITY_IAM",
+  ]);
+}
+
 async function main() {
   console.log("schuit-sharing guided setup");
   console.log("============================");
-  console.log("Automates README.md steps 1-3's mechanical parts: bucket");
-  console.log("creation, SSM parameter writes, and assembling");
-  console.log("deploy.config.<name>.json. Deliberately does NOT automate:");
-  console.log("creating OAuth clients (needs the Google/Facebook consoles),");
-  console.log("SES/email, or custom domains -- those need a real domain or");
-  console.log("console only you control. See README.md for those, once this");
-  console.log("basic deployment is live.\n");
+  console.log("Automates README.md steps 1-4b's mechanical parts: bucket");
+  console.log("creation, SSM parameter writes, assembling");
+  console.log("deploy.config.<name>.json, and (if you give a domain) the");
+  console.log("frontend hosting (step 4) and SES (step 4b) CloudFormation");
+  console.log("deploys. Deliberately does NOT automate: creating OAuth");
+  console.log("clients (needs the Google/Facebook consoles) or custom");
+  console.log("domains for the API/Cognito Hosted UI -- those need a");
+  console.log("console only you control, or (for Cognito) are disruptive");
+  console.log("enough to sign-in that they shouldn't happen as a side");
+  console.log("effect of a routine setup run. See README.md for those.\n");
 
   console.log("Checking prerequisites...");
   const missing = ["aws", "sam", "node"].filter((c) => !have(c));
   if (missing.length) {
-    console.error(`Missing: ${missing.join(", ")}. See README.md "Prereqs".`);
+    console.error(`Missing: ${missing.join(", ")}. See README.md "Requirements".`);
     process.exit(1);
   }
   console.log("  OK: aws, sam, node all found.\n");
@@ -180,24 +209,95 @@ async function main() {
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`\n==> Wrote ${configPath}`);
 
-  console.log("\nWhat this did NOT set up (see README.md for these, once you're live):");
-  console.log("  - SES (invite emails) -- README step 4b");
-  console.log("  - Frontend hosting (CloudFront/S3/DNS for the SPA) -- README step 4");
-  console.log("  - Custom domains for the API/Cognito Hosted UI -- README \"Custom domains\"");
+  console.log("\nStill manual either way (see README.md \"Custom domains\"):");
+  console.log("  - Custom domains for the API/Cognito Hosted UI");
   if (!domain) {
-    console.log("  - You skipped a domain, so this deploys backend-only for now (no 'frontend' block).");
+    console.log("  - You skipped a domain, so this deploys backend-only for now (no 'frontend' block, no steps 4/4b).");
   }
 
-  if (await askYesNo("\nRun the deploy now? (sam build + deploy, Cognito wiring)", true)) {
+  const backendDir = resolve(REPO_ROOT, "backend");
+  let backendDeployed = false;
+  if (await askYesNo("\nRun the backend deploy now? (sam build + deploy, Cognito wiring)", true)) {
     console.log();
-    const backendDir = resolve(REPO_ROOT, "backend");
     if (!existsSync(resolve(backendDir, "node_modules"))) {
       console.log("==> Installing backend dependencies (first run)");
       run("npm", ["install"], { cwd: backendDir });
     }
     run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
+    backendDeployed = true;
   } else {
     console.log(`\nWhen you're ready: cd backend && node scripts/deploy.mjs deploy.config.${spaceName}.json`);
+  }
+
+  if (domain) {
+    console.log("\n---\nStep 4: frontend hosting (CloudFront + ACM + Route 53)");
+    if (await askYesNo(`Deploy the frontend hosting stack for ${domain} now?`, true)) {
+      const parentZone = await ask("Parent Route 53 hosted zone", domain);
+      const zoneId = hostedZoneIdFor(parentZone);
+      if (!zoneId) {
+        console.log(`\nNo hosted zone found for ${parentZone}. Create one first:`);
+        console.log(`  aws route53 create-hosted-zone --name ${parentZone} --caller-reference "$(date +%s)"`);
+        console.log("then re-run this script, or see README.md step 4.");
+      } else {
+        const frontendStack = `${spaceName}-frontend`;
+        console.log(`\n==> Deploying ${frontendStack} to us-east-1 (CloudFront/ACM can take 15-30+ min to fully propagate)`);
+        cfnDeploy(frontendStack, "frontend-infra.yml", "us-east-1", {
+          DomainName: domain,
+          HostedZoneId: zoneId,
+          SiteBucket: sharesBucket,
+          SitePrefix: "web",
+          SiteBucketRegion: region,
+        });
+        config.frontend = { distributionStackName: frontendStack };
+        writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+        console.log(`==> Wrote "frontend": { "distributionStackName": "${frontendStack}" } into ${configPath}`);
+        if (backendDeployed) {
+          console.log("==> Rebuilding + syncing the SPA to it");
+          run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
+          console.log(`\nSPA should be live shortly at https://${domain}`);
+        } else {
+          console.log(`\nRun the backend deploy to build + sync the SPA to it:`);
+          console.log(`  cd backend && node scripts/deploy.mjs deploy.config.${spaceName}.json`);
+        }
+      }
+    } else {
+      console.log("Skipped -- run infrastructure/deploy.sh, or see README.md step 4, when ready.");
+    }
+
+    console.log("\n---\nStep 4b: SES (invite emails)");
+    if (await askYesNo(`Deploy the SES email stack for ${domain} now?`, true)) {
+      const mailFromSub = await ask("MAIL FROM subdomain", "mail");
+      const parentZone = await ask("Parent Route 53 hosted zone", domain);
+      const zoneId = hostedZoneIdFor(parentZone);
+      if (!zoneId) {
+        console.log(`\nNo hosted zone found for ${parentZone}. See README.md step 4b.`);
+      } else {
+        const emailStack = `${spaceName}-email`;
+        console.log(`\n==> Deploying ${emailStack} to us-east-1`);
+        cfnDeploy(emailStack, "email-infra.yml", "us-east-1", {
+          Domain: domain,
+          MailFromSubdomain: mailFromSub,
+          HostedZoneId: zoneId,
+          Region: "us-east-1",
+        });
+        config.mailFrom = `noreply@${domain}`;
+        config.mailRegion = "us-east-1";
+        writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+        console.log(`\nDKIM verification is asynchronous (5-60 min). Check status:`);
+        console.log(`  aws ses get-identity-verification-attributes --region us-east-1 --identities ${domain} --query 'VerificationAttributes."${domain}".VerificationStatus' --output text`);
+        console.log(`\nSES starts in sandbox mode -- verify a test recipient before real invites go out:`);
+        console.log(`  aws ses verify-email-identity --region us-east-1 --email-address ${adminEmail || "you@example.com"}`);
+        console.log("then request production access (usually granted within 24h):");
+        console.log("  https://console.aws.amazon.com/ses/home?region=us-east-1#/account");
+        if (await askYesNo("\nRedeploy the backend now so MAIL_FROM/MAIL_REGION land?", backendDeployed)) {
+          run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
+        } else {
+          console.log(`\nWhen ready: cd backend && node scripts/deploy.mjs deploy.config.${spaceName}.json`);
+        }
+      }
+    } else {
+      console.log("Skipped -- run infrastructure/email-deploy.sh, or see README.md step 4b, when ready.");
+    }
   }
 
   rl.close();
