@@ -1,31 +1,34 @@
 # schuit-sharing
 
-An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3.
-Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
+An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3. Auth is
+**Cognito** (Google, Facebook, or email + password), access is controlled per-mount, and admins
+invite users by email. There's also a companion mobile app (Expo/React Native) that consumes the
+same backend.
 
-> **Status:** Live on `schuit-sharing-prod-sam` — the backend runs on **AWS
-> SAM**, not the original Serverless Framework app (that stack was cut over
-> and deleted 2026-08-09; see "Deploy the backend" below). Auth is on a
-> **custom Cognito domain** (`auth.schuit.io`, not the auto-generated
-> `*.amazoncognito.com` one) — see "Custom Cognito domain" below. There's
-> also a **mobile app** (Expo/React Native, `BackFriend_Mobile`) consuming
-> this same backend, which is why it now exposes a public `GET /config`
-> discovery endpoint (used by the app's "add account" flow; the web SPA
-> doesn't need it).
->
-> SES has **production access** — invite mail sends to any recipient (quota
-> 50k/day). (Email/password *verification* codes use Cognito's own sender,
-> separate from SES.) The shares bucket is fully private — **S3 Public Access
-> Block is on**; the only ways to reach a file are a signed-in browse/download
-> (5-min presigned GET) or an explicit per-file "public" token link.
+This README walks through deploying your own copy end-to-end. Every example below uses the
+placeholder domain **`slapchop.vinceoffer.com`** — swap in whatever domain you actually
+control as you go.
+
+## Requirements
+
+Before you start, make sure you have:
+
+- [ ] **An AWS account** with billing enabled — [Sign up for AWS](https://portal.aws.amazon.com/billing/signup)
+- [ ] **AWS CLI installed and configured** with credentials for that account — [Install & configure the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+- [ ] **Node.js 20+ and npm** — [Install Node.js](https://nodejs.org/en/download)
+- [ ] **AWS SAM CLI ≥ 1.163** — [Install the AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
+- [ ] **A domain you control, with a Route 53 hosted zone** (or one you can create) — this is what `slapchop.vinceoffer.com` stands in for below
+- [ ] *(Optional)* **A Google Cloud project** for Google sign-in — skip this and Facebook below if you only want email/password
+- [ ] *(Optional)* **A Meta for Developers app** for Facebook sign-in — [developers.facebook.com](https://developers.facebook.com/)
 
 - Auth: **Cognito** — sign in with **Google**, **Facebook**, *or* **email + password**
   (all via the Cognito hosted UI; email/password users self-register through the invite
   gate and verify their address with a one-time code)
-- First admin: `riley.schuit@gmail.com` (bootstrapped via env var)
+- First admin(s): whichever email(s) you list in `bootstrapAdminEmails` in your deploy config —
+  they're auto-promoted to admin on first sign-in, no manual setup needed
 - Admins invite other users by email; invitees go to the site and "Sign in with
   Google", "Sign in with Facebook", or "Sign in with email" → "Sign up"
-- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://schuit-sharing/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
+- Admins configure **mounts** — a URL path (e.g. `/roms`) mapped to an S3 prefix (e.g. `s3://your-bucket/Video_Game_ROMs/`). The Admin page has an **Explore bucket** browser that lists the real S3 layout so a directory can be turned into a mount in one click.
 
 ### Features
 
@@ -43,7 +46,7 @@ Served at **[sharing.schuit.io](https://sharing.schuit.io)**.
 > already exists under another collides in Cognito (`already found an entry for
 > username`). Automatic account-linking is not configured, so pick one method per
 > invitee.
-- Everything behind a single CloudFront distribution on `sharing.schuit.io`
+- Everything behind a single CloudFront distribution on your domain (e.g. `slapchop.vinceoffer.com`)
 
 ## Layout
 
@@ -75,7 +78,7 @@ schuit-sharing/
 
 ```
                         ┌─────────────────────────────────┐
- sharing.schuit.io ────▶│ CloudFront distribution          │
+ slapchop.vinceoffer.com ─▶│ CloudFront distribution   │
                         │  ├─ default  → S3 site (SPA)     │
                         │  └─ /api/*  → API Gateway (Lambda│
                         │                strip /api prefix)│
@@ -99,18 +102,10 @@ schuit-sharing/
                         │ public-shares│            │
                         └──────────────┘            │
                         ┌──────────────┐            │
-                        │ S3: schuit-  │◀───────────┘
-                        │ sharing/...  │   presigned GETs
+                        │ S3: your-    │◀───────────┘
+                        │ bucket/...   │   presigned GETs
                         └──────────────┘
 ```
-
-## Prereqs
-
-- Node 20, npm
-- AWS CLI configured (for the AWS account that owns your domain in Route 53)
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) ≥ 1.163
-- A Google Cloud project for OAuth (optional — skip for email/password-only)
-- A Meta for Developers app for Facebook Login (https://developers.facebook.com/) (optional)
 
 ## 1. Create the OAuth clients (Google + Facebook)
 
@@ -121,7 +116,7 @@ schuit-sharing/
 3. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
    - Application type: **Web application**
    - Authorized JavaScript origins:
-     - `https://sharing.schuit.io`
+     - `https://slapchop.vinceoffer.com`
      - `http://localhost:5173` (for local dev)
    - Authorized redirect URIs (these are Cognito's hosted UI endpoints — you'll get the final domain in step 3, so come back and update these):
      - `https://<cognito-domain>/oauth2/idpresponse`
@@ -207,8 +202,7 @@ Fill in `deploy.config.<name>.json` — every field is explained by a
   are pulled from SSM at deploy time, never written to this file.
 - `adopt` — omit for a brand-new space (this creates a fresh Cognito pool +
   tables). Only needed if you're pointing a new compute stack at an existing
-  pool (that's what this deployment's own `prod` config does — see "Custom
-  Cognito domain" below for why that matters).
+  pool.
 - `frontend` — omit to deploy backend-only. When present, `distributionStackName`
   must name an **already-deployed** frontend stack (step 4, below) — this
   script doesn't create infrastructure, only builds and pushes to it.
@@ -243,21 +237,21 @@ admins group.
 
 - ACM certificate for your chosen domain (DNS-validated)
 - CloudFront Origin Access Control (OAC)
-- CloudFront distribution, single origin: the existing `schuit-sharing`
-  bucket, scoped to the `web/` prefix
+- CloudFront distribution, single origin: your existing shares bucket,
+  scoped to the `web/` prefix
 - Route 53 A-alias `<your domain> → CloudFront`
 
-**Recommended: the SPA goes at your bare/apex domain** (e.g. `schuit.io`,
-not `sharing.schuit.io`) — see "Custom domains" below for why (the API and
+**Recommended: the SPA goes at your bare/apex domain** (e.g. `vinceoffer.com`,
+not `slapchop.vinceoffer.com`) — see "Custom domains" below for why (the API and
 Cognito get their *own* subdomains instead, so nothing needs to share the
 apex with path-based routing). `DomainName` accepts anything, though; use a
 subdomain if you'd rather.
 
-The SPA lives at `s3://schuit-sharing/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix. The API is **not** proxied through this distribution — see "Custom domains" for how it's reached instead.
+The SPA lives at `s3://your-bucket/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix. The API is **not** proxied through this distribution — see "Custom domains" for how it's reached instead.
 
 > [!CAUTION]
 > **DNS model — read this first.** **You only need the parent hosted zone**
-> (e.g. `schuit.io`) — there is **no** separate hosted zone needed for a
+> (e.g. `vinceoffer.com`) — there is **no** separate hosted zone needed for a
 > subdomain. Subdomains are just records inside the parent zone. This stack
 > adds a temporary CNAME for ACM validation (removed after the cert issues)
 > and a permanent A-alias for whatever `DomainName` you give it.
@@ -294,38 +288,39 @@ aws cloudformation deploy \
   --parameter-overrides \
       DomainName=your-domain.example \
       HostedZoneId=$HOSTED_ZONE_ID \
-      SiteBucket=schuit-sharing \
+      SiteBucket=your-bucket \
       SitePrefix=web \
       SiteBucketRegion=us-east-1 \
   --capabilities CAPABILITY_IAM
 ```
 
 Outputs:
-- `SiteBucketName` — `schuit-sharing`
+- `SiteBucketName` — your bucket name
 - `SitePrefix` — `web`
-- `SiteUploadPath` — `s3://schuit-sharing/web/` (sync target)
+- `SiteUploadPath` — `s3://your-bucket/web/` (sync target)
 - `DistributionId` — for cache invalidation
-- `Url` — `https://sharing.schuit.io`
+- `Url` — `https://slapchop.vinceoffer.com`
 
 > **Heads-up on bucket policy:** this stack now owns the bucket policy on
-> `schuit-sharing` (the OAC grant). Don't set a bucket policy manually or
+> your shares bucket (the OAC grant). Don't set a bucket policy manually or
 > via another tool — put any additional statements in `SiteBucketPolicy`
-> inside `frontend-infra.yml` and redeploy. Lambda access to ROM files
+> inside `frontend-infra.yml` and redeploy. Lambda access to shared files
 > uses IAM (not the bucket policy), so this doesn't affect the backend.
 
 ## 4b. Deploy the SES email stack (for invite emails)
 
-`infrastructure/email-infra.yml` creates the SES sending identity for
-`schuit.io` so the backend can email invitees from `noreply@schuit.io`.
-It coexists with Google Workspace on the same root domain because:
+`infrastructure/email-infra.yml` creates the SES sending identity for your
+domain so the backend can email invitees from `noreply@vinceoffer.com`.
+It coexists with an existing mail provider (Google Workspace, etc.) on the
+same root domain because:
 
-- DKIM uses unique selector subdomains (`<token>._domainkey.schuit.io`),
-  not Google's `google._domainkey.schuit.io`. They don't collide.
-- The custom **MAIL FROM** lives on a *subdomain* (`mail.schuit.io`), with
+- DKIM uses unique selector subdomains (`<token>._domainkey.vinceoffer.com`),
+  not your existing provider's DKIM selector. They don't collide.
+- The custom **MAIL FROM** lives on a *subdomain* (`mail.vinceoffer.com`), with
   its own MX (`feedback-smtp.us-east-1.amazonses.com`) and SPF
-  (`v=spf1 include:amazonses.com ~all`). The root domain's MX (Google) and
+  (`v=spf1 include:amazonses.com ~all`). The root domain's MX and
   any root SPF stay untouched.
-- Outbound mail still says `From: noreply@schuit.io` and is DKIM-signed
+- Outbound mail still says `From: noreply@vinceoffer.com` and is DKIM-signed
   by the apex identity, so DMARC alignment passes.
 
 Deploy:
@@ -344,7 +339,7 @@ aws cloudformation deploy \
   --stack-name schuit-sharing-email \
   --template-file infrastructure/email-infra.yml \
   --parameter-overrides \
-      Domain=schuit.io \
+      Domain=your-domain.example \
       MailFromSubdomain=mail \
       HostedZoneId=$HOSTED_ZONE_ID \
       Region=us-east-1 \
@@ -359,8 +354,8 @@ DKIM CNAMEs propagate, then SES detects them and flips the identity to
 ```bash
 aws ses get-identity-verification-attributes \
   --region us-east-1 \
-  --identities schuit.io \
-  --query 'VerificationAttributes."schuit.io".VerificationStatus' \
+  --identities your-domain.example \
+  --query 'VerificationAttributes."your-domain.example".VerificationStatus' \
   --output text
 ```
 
@@ -368,16 +363,13 @@ aws ses get-identity-verification-attributes \
 
 ### Sandbox mode (one-time gate)
 
-> This account **already has SES production access** — the steps below only
-> apply to a fresh account.
-
-A new SES account is in **sandbox**: you can only send to *verified*
+A brand-new SES account is in **sandbox**: you can only send to *verified*
 recipient addresses (max 200 messages/day, 1/sec). For initial testing,
 verify your own inbox:
 
 ```bash
 aws ses verify-email-identity --region us-east-1 \
-  --email-address riley.schuit@gmail.com
+  --email-address you@example.com
 # (click the link in the email AWS sends you)
 ```
 
@@ -534,14 +526,14 @@ auto-generated `amazoncognito.com` domain instead. Neither is part of
 
 ## 5. First sign-in + configure a mount
 
-1. Open https://sharing.schuit.io
-2. Click **Sign in with Google** → pick `riley.schuit@gmail.com`
+1. Open `https://slapchop.vinceoffer.com`
+2. Click **Sign in with Google** (or Facebook, or email) → sign in as one of your `bootstrapAdminEmails`
 3. You should land on the Home page. Click **Admin** in the nav.
 4. Scroll to **Add a shared directory (mount)**. Defaults are pre-filled:
    - Path: `roms`
    - Display name: `Video Game ROMs`
    - S3 prefix: `Video_Game_ROMs/`
-   - Bucket: *(leave blank; defaults to `schuit-sharing`)*
+   - Bucket: *(leave blank; defaults to your configured shares bucket)*
 5. Click **Add mount**.
 6. Head back to Home → click **Video Game ROMs** → browse and download.
 
@@ -549,16 +541,16 @@ auto-generated `amazoncognito.com` domain instead. Neither is part of
 
 In Admin → **Invite a user**:
 
-- Email must match the Google account they'll sign in with
+- Email must match the account they'll sign in with (Google/Facebook email, or the address they'll use for email/password)
 - Pick a TTL (14 days default)
 - Optionally check **Make admin** to give them admin rights on first sign-in
 - **Send invite email** is on by default — the invitee gets an email from
-  `noreply@schuit.io` with the signup link. Uncheck it if you want to
+  `noreply@vinceoffer.com` with the signup link. Uncheck it if you want to
   share the link out-of-band (Slack, etc.). If SES is still in sandbox
   and the recipient isn't verified, the form shows a warning + the link
   so you can paste it yourself.
 
-They go to https://sharing.schuit.io and use **Sign in with Google**, **Sign in
+They go to `https://slapchop.vinceoffer.com` and use **Sign in with Google**, **Sign in
 with Facebook**, or **Sign in with email → Sign up** (email/password users get a one-time verification
 code — sent by Cognito's default email sender, which is *not* subject to the SES
 sandbox, so it reaches any invitee). Either way, the `preSignUp` Lambda trigger lets
@@ -589,7 +581,7 @@ Add `http://localhost:5173/auth/callback` to:
 
 ## Continuous deployment (GitHub Actions)
 
-Pushes to `main` deploy to prod via `.github/workflows/deploy.yml` — no
+Pushes to `main` deploy via `.github/workflows/deploy.yml` — no
 long-lived AWS keys (GitHub OIDC → a scoped IAM role). The workflow writes a
 repo secret's contents to `backend/deploy.config.json` (the file itself is
 gitignored — see step 3) and runs `node scripts/deploy.mjs deploy.config.json`,
@@ -612,11 +604,10 @@ build+sync+invalidation.
    role just needs `ssm:GetParameter` on those paths, which it already has).
 
 The CloudFormation deploy above creates `schuit-sharing-gha-deploy`, trusted
-only by `SturgeonTechnologies/schuit-sharing` on `main` (via the account's
-existing GitHub OIDC provider). The workflow already references this role
-ARN — update it in `deploy.yml` if you fork this under a different repo.
-After the role exists and the secret's set, push to `main` (or run the
-workflow manually from the Actions tab).
+only by your fork's `<owner>/schuit-sharing` on `main` (via your account's
+GitHub OIDC provider). Update the role ARN referenced in `deploy.yml` to
+match your fork before relying on it. After the role exists and the secret's
+set, push to `main` (or run the workflow manually from the Actions tab).
 
 > The role's policy is scoped by resource for S3/IAM/SSM/CloudFront/DynamoDB but
 > broad (service-level) for CloudFormation/Lambda/API Gateway/Cognito, which are
@@ -624,7 +615,7 @@ workflow manually from the Actions tab).
 >
 > The bucket's Public Access Block + CORS are set out-of-band and are **not**
 > touched by CI. First-ever admin bootstrap (a real sign-in) also can't be done
-> by CI — already done here.
+> by CI — do that yourself once the stack is live.
 
 ## Security notes
 
@@ -639,10 +630,19 @@ workflow manually from the Actions tab).
 
 ## Tighten for production
 
-- Change `httpApi.cors.allowedOrigins` from `*` to `https://sharing.schuit.io`.
+- Change `httpApi.cors.allowedOrigins` from `*` to `https://slapchop.vinceoffer.com`.
 - Publish the Google OAuth consent screen out of **Testing** so invitees can sign in without being test users.
 - Add a WAF web ACL to the CloudFront distribution.
 - Add CloudWatch alarms on Lambda errors/throttles and DynamoDB throttles.
 - Turn on MFA in Cognito (`MfaConfiguration: OPTIONAL`) for the email/password accounts.
+- Request SES production access (see 4b) so invite mail isn't limited to sandbox-verified recipients.
 - Consider CloudFront signed URLs for very large files; S3 presigned GETs are fine up to a few hundred MB.
-Done already: SES production access, the S3 Public Access Block lockdown described above, and **GitHub Actions CD** (see the section above; run the one-time role setup to activate it).
+- Set up GitHub Actions CD (see above) once you're happy with a config and want pushes to `main` to deploy automatically.
+
+## How long does this take?
+
+Budget about **an hour** for a full first-time deployment, start to finish — OAuth client
+setup, backend + frontend deploys, DNS/ACM certificate validation, and SES DKIM verification.
+Most of that hour is *waiting* (DNS propagation, ACM issuance, SES verification), not active
+work, so it's a good excuse to get coffee partway through rather than something you need to
+babysit.
