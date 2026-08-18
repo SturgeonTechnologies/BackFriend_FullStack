@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tears down a schuit-sharing deployment created by quickstart.mjs: the SAM
+// Tears down a deployment of this app created by quickstart.mjs: the SAM
 // backend stack, the frontend hosting stack, and the SES email stack
 // (whichever exist), found by naming convention (<space>-sam / -frontend /
 // -email) or from backend/deploy.config.<space>.json if present.
@@ -133,7 +133,7 @@ async function main() {
   const lower = (s) => (s || "").toLowerCase();
   const looksProd = lower(stage) === "prod" || lower(space) === "prod";
 
-  console.log(`schuit-sharing teardown -- space "${space}"${stage ? `, stage "${stage}"` : ""}, region ${region}`);
+  console.log(`Teardown -- space "${space}"${stage ? `, stage "${stage}"` : ""}, region ${region}`);
   if (config) {
     console.log(`Found ${configPath} (this file won't be deleted -- remove it by hand once you're done).`);
   } else {

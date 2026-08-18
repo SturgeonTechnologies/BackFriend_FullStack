@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Guided setup for a new schuit-sharing deployment. Walks through creating
+// Guided setup for a new deployment of this app. Walks through creating
 // backend/deploy.config.<name>.json and (optionally) running the deploy,
 // then (if you gave a domain) offers to deploy the frontend hosting stack
 // (README step 4) and the SES email stack (README step 4b) too.
@@ -41,7 +41,8 @@ const rl = createInterface({ input: stdin, output: stdout });
 
 // ---------- CLI flags / env vars ----------
 // FLAGS: --space/SPACE_NAME, --stage/STAGE, --region/REGION,
-// --shares-bucket/SHARES_BUCKET, --admin-email/ADMIN_EMAIL, --domain/DOMAIN,
+// --shares-bucket/SHARES_BUCKET, --artifact-bucket/ARTIFACT_BUCKET,
+// --admin-email/ADMIN_EMAIL, --domain/DOMAIN,
 // --parent-zone/PARENT_ZONE, --mail-from-sub/MAIL_FROM_SUB,
 // --google-client-id/GOOGLE_CLIENT_ID, --google-client-secret/GOOGLE_CLIENT_SECRET,
 // --facebook-client-id/FACEBOOK_CLIENT_ID, --facebook-client-secret/FACEBOOK_CLIENT_SECRET,
@@ -232,8 +233,8 @@ function cfnDeploy(stackName, templateFile, region, params) {
 }
 
 async function main() {
-  console.log("schuit-sharing guided setup");
-  console.log("============================");
+  console.log("Guided deployment setup");
+  console.log("========================");
   console.log("Automates README.md steps 1-4b's mechanical parts: bucket");
   console.log("creation, SSM parameter writes, assembling");
   console.log("deploy.config.<name>.json, and (if you give a domain) the");
@@ -294,7 +295,12 @@ async function main() {
   );
 
   const accountId = runQuiet("aws", ["sts", "get-caller-identity", "--query", "Account", "--output", "text"]).trim();
-  const artifactBucket = `${spaceName}-sam-artifacts-${accountId}`;
+  // Overridable: if you recently deleted a same-named bucket, S3 can hold the
+  // name "reserved" for a while (sometimes well past when the bucket itself
+  // shows as gone) and CreateBucket fails with OperationAborted /
+  // "conflicting conditional operation" until that clears -- pick a fresh
+  // name instead of waiting on AWS's internal state.
+  const artifactBucket = presetValue("artifact-bucket", "ARTIFACT_BUCKET") || `${spaceName}-sam-artifacts-${accountId}`;
   const stackName = `${spaceName}-sam`;
 
   console.log(`\n==> Ensuring artifact bucket ${artifactBucket} exists`);
