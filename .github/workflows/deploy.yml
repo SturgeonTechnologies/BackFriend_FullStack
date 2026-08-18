@@ -16,8 +16,11 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  # Matches the role created by infrastructure/github-oidc.yml. If you renamed
-  # it, update this ARN.
+  # Matches the role created by infrastructure/github-oidc.yml, which is
+  # named "<ResourcePrefix>-gha-deploy" by default (see that template's
+  # ResourcePrefix/Stage/RoleName parameters). If you deployed the template
+  # with different parameter overrides, or a different RoleName, update this
+  # ARN to match.
   DEPLOY_ROLE_ARN: arn:aws:iam::587449585882:role/schuit-sharing-gha-deploy
 
 jobs:

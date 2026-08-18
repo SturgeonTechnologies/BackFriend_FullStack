@@ -20,12 +20,36 @@ Parameters:
   DistributionId:
     Type: String
     Default: E26FQPCAP5752P
+  ResourcePrefix:
+    Type: String
+    Default: schuit-sharing
+    Description: >
+      Prefix for this deployment's resources -- the CloudFormation stack,
+      Lambda functions, DynamoDB tables, log groups, the serverless
+      deployment bucket, and the SSM parameter path. Must match the
+      resourcePrefix used in your deploy.config.json.
+  Stage:
+    Type: String
+    Default: prod
+    Description: >
+      Deployment stage suffix (combined with ResourcePrefix as
+      "<ResourcePrefix>-<Stage>"). Must match the stage used in your
+      deploy.config.json.
+  RoleName:
+    Type: String
+    Default: ""
+    Description: >
+      Name for the deploy IAM role. Leave blank to default to
+      "<ResourcePrefix>-gha-deploy".
+
+Conditions:
+  UseDefaultRoleName: !Equals [!Ref RoleName, ""]
 
 Resources:
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: schuit-sharing-gha-deploy
+      RoleName: !If [UseDefaultRoleName, !Sub "${ResourcePrefix}-gha-deploy", !Ref RoleName]
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -62,7 +86,7 @@ Resources:
                   - cloudformation:GetTemplateSummary
                   - cloudformation:ListStackResources
                 Resource:
-                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/schuit-sharing-prod/*"
+                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/${ResourcePrefix}-${Stage}/*"
               - Effect: Allow
                 Action:
                   - cloudformation:ValidateTemplate
@@ -72,7 +96,7 @@ Resources:
               # --- Lambda: this service's functions (+ a couple of read-only account calls) ---
               - Effect: Allow
                 Action: lambda:*
-                Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:schuit-sharing-prod-*"
+                Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${ResourcePrefix}-${Stage}-*"
               - Effect: Allow
                 Action:
                   - lambda:GetAccountSettings
@@ -91,8 +115,8 @@ Resources:
               - Effect: Allow
                 Action: dynamodb:*
                 Resource:
-                  - !Sub "arn:aws:dynamodb:us-east-1:${AWS::AccountId}:table/schuit-sharing-prod-*"
-                  - !Sub "arn:aws:dynamodb:us-east-1:${AWS::AccountId}:table/schuit-sharing-prod-*/index/*"
+                  - !Sub "arn:aws:dynamodb:us-east-1:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-*"
+                  - !Sub "arn:aws:dynamodb:us-east-1:${AWS::AccountId}:table/${ResourcePrefix}-${Stage}-*/index/*"
 
               # --- Log groups for this stack's Lambdas ---
               - Effect: Allow
@@ -102,7 +126,7 @@ Resources:
                   - logs:DescribeLogGroups
                   - logs:PutRetentionPolicy
                   - logs:TagResource
-                Resource: !Sub "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/schuit-sharing-prod-*"
+                Resource: !Sub "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-${Stage}-*"
 
               # --- IAM: only the roles serverless manages for this service, + pass to Lambda ---
               - Effect: Allow
@@ -118,14 +142,14 @@ Resources:
                   - iam:PassRole
                   - iam:TagRole
                   - iam:UntagRole
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/schuit-sharing-*"
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}-*"
 
               # --- SSM: Google OAuth creds, read at deploy time ---
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
                   - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter/schuit-sharing/*"
+                Resource: !Sub "arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter/${ResourcePrefix}/*"
 
               # --- S3: the serverless deployment bucket (create + artifacts) ---
               - Effect: Allow
@@ -143,8 +167,8 @@ Resources:
                   - s3:PutObject
                   - s3:DeleteObject
                 Resource:
-                  - !Sub "arn:aws:s3:::schuit-sharing-prod-serverlessdeploymentbucket-*"
-                  - !Sub "arn:aws:s3:::schuit-sharing-prod-serverlessdeploymentbucket-*/*"
+                  - !Sub "arn:aws:s3:::${ResourcePrefix}-${Stage}-serverlessdeploymentbucket-*"
+                  - !Sub "arn:aws:s3:::${ResourcePrefix}-${Stage}-serverlessdeploymentbucket-*/*"
 
               # --- S3: SPA sync target — only the web/ prefix of the shares bucket ---
               - Effect: Allow

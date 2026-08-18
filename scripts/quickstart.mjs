@@ -165,6 +165,42 @@ function bucketExists(bucket, region) {
   }
 }
 
+// S3 bucket names are globally unique (not per-region) -- head-bucket
+// succeeding doesn't mean the bucket is actually IN the region you asked
+// for. Reusing a same-named bucket that landed in a different region on an
+// earlier run is exactly what makes `sam deploy --region X --s3-bucket Y`
+// fail later with an opaque "deployment s3 bucket is in a different region"
+// error. Check for real, here, where it's cheap to give an actionable
+// message instead.
+function bucketRegion(bucket) {
+  try {
+    const out = runQuiet("aws", [
+      "s3api", "get-bucket-location", "--bucket", bucket, "--query", "LocationConstraint", "--output", "text",
+    ]).trim();
+    return !out || out === "None" ? "us-east-1" : out; // us-east-1 reports LocationConstraint: null
+  } catch {
+    return null;
+  }
+}
+
+function ensureBucketInRegion(bucket, region, label) {
+  if (!bucketExists(bucket, region)) {
+    createBucket(bucket, region);
+    return;
+  }
+  const actual = bucketRegion(bucket);
+  if (actual && actual !== region) {
+    console.error(
+      `\nERROR: ${label} bucket "${bucket}" already exists, but in region "${actual}" -- not the "${region}" you asked for.\n` +
+      `S3 bucket names are global, so this exact name can't be created in "${region}" too. Either:\n` +
+      `  - deploy in "${actual}" instead (matches where this bucket already lives), or\n` +
+      `  - pick a different space name so a fresh, region-matched bucket gets created.`,
+    );
+    process.exit(1);
+  }
+  console.log(`    already exists in ${actual ?? region}, skipping.`);
+}
+
 function createBucket(bucket, region) {
   const args = ["s3api", "create-bucket", "--bucket", bucket, "--region", region];
   if (region !== "us-east-1") {
@@ -262,18 +298,10 @@ async function main() {
   const stackName = `${spaceName}-sam`;
 
   console.log(`\n==> Ensuring artifact bucket ${artifactBucket} exists`);
-  if (bucketExists(artifactBucket, region)) {
-    console.log("    already exists, skipping.");
-  } else {
-    createBucket(artifactBucket, region);
-  }
+  ensureBucketInRegion(artifactBucket, region, "Artifact");
 
   console.log(`==> Ensuring shares bucket ${sharesBucket} exists`);
-  if (bucketExists(sharesBucket, region)) {
-    console.log("    already exists, skipping.");
-  } else {
-    createBucket(sharesBucket, region);
-  }
+  ensureBucketInRegion(sharesBucket, region, "Shares");
 
   const oauth = {};
   console.log("\nOAuth sign-in (optional -- skip for email/password-only; you can add these later by editing the config and redeploying).");

@@ -75,13 +75,13 @@ Parameters:
 
   BootstrapAdminEmails:
     Type: String
-    Default: riley.schuit@gmail.com
-    Description: Comma-separated emails auto-promoted to admins on first sign-in.
+    Default: ""
+    Description: Comma-separated emails auto-promoted to admins on first sign-in. Leave blank and no one is auto-promoted -- set this explicitly (deploy.config.<name>.json's bootstrapAdminEmails) rather than relying on a default.
 
   MailFrom:
     Type: String
-    Default: noreply@schuit.io
-    Description: SES verified From address for invite emails.
+    Default: noreply@example.com
+    Description: SES verified From address for invite emails. Must be a domain you've verified in SES -- set via deploy.config.<name>.json's mailFrom, not this default.
 
   MailRegion:
     Type: String
@@ -112,13 +112,13 @@ Parameters:
 
   WebCallbackUrls:
     Type: CommaDelimitedList
-    Default: "http://localhost:5173/auth/callback,https://sharing.schuit.io/auth/callback"
-    Description: OAuth callback URLs for the web SPA client.
+    Default: "http://localhost:5173/auth/callback"
+    Description: OAuth callback URLs for the web SPA client. Add your real domain's callback via deploy.config.<name>.json's webCallbackUrls once you have one -- this default is local-dev-only.
 
   WebLogoutUrls:
     Type: CommaDelimitedList
-    Default: "http://localhost:5173/,https://sharing.schuit.io/"
-    Description: OAuth sign-out URLs for the web SPA client.
+    Default: "http://localhost:5173/"
+    Description: OAuth sign-out URLs for the web SPA client. Add your real domain's URL via deploy.config.<name>.json's webLogoutUrls once you have one -- this default is local-dev-only.
 
   MobileCallbackUrls:
     Type: CommaDelimitedList
