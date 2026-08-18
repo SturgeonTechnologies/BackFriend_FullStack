@@ -8,6 +8,8 @@ import {
   normalizeMountPath,
   normalizePrefix,
   normalizeAllowedEmails,
+  isReservedTopLevelPrefix,
+  RESERVED_PERSONAL_PREFIX,
 } from "../../lib/mounts";
 import { ensureInvitesFor } from "../../lib/invites";
 
@@ -39,6 +41,13 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
 
     const bucket = body.bucket?.trim() || process.env.SHARES_BUCKET!;
     const prefix = normalizePrefix(body.prefix ?? "");
+    if (isReservedTopLevelPrefix(prefix)) {
+      return error(
+        400,
+        `"${RESERVED_PERSONAL_PREFIX}" is reserved for personal per-user storage and can't be mounted ` +
+        `directly — mount a subfolder inside it instead (e.g. "${RESERVED_PERSONAL_PREFIX}<email>/").`,
+      );
+    }
     const allowedEmails = normalizeAllowedEmails(body.allowedEmails);
 
     const item: Record<string, unknown> = {

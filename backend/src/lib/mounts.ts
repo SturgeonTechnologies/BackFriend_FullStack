@@ -21,6 +21,20 @@ export function normalizePrefix(input: string): string {
 }
 
 /**
+ * Reserved top-level prefix for personal storage: per-user content (synced/
+ * converted from elsewhere) lives at `user_sharing_default/<email>/...`. The
+ * bare top-level prefix can't be mounted directly -- that would put every
+ * user's personal folder behind one shared view. Per-user subfolders
+ * underneath it are ordinary, mountable content.
+ */
+export const RESERVED_PERSONAL_PREFIX = "user_sharing_default/";
+
+/** True if `prefix` (after normalization) is exactly the reserved top-level personal-storage prefix. */
+export function isReservedTopLevelPrefix(prefix: string): boolean {
+  return normalizePrefix(prefix) === RESERVED_PERSONAL_PREFIX;
+}
+
+/**
  * Guard against traversal. The caller supplies a subpath they want to browse
  * within the mount; we reject anything that tries to escape the mount's prefix.
  */
