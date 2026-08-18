@@ -244,10 +244,12 @@ export async function wireCognito({ stackName, region, functionPrefix, emailFrom
 // Standalone CLI usage — unchanged interface, now delegating to wireCognito().
 const isMain = import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`;
 if (isMain) {
-  const STAGE = process.env.STAGE || "dev";
-  const SERVICE = "schuit-sharing";
-  const stackName = process.env.STACK_NAME || `${SERVICE}-${STAGE}`;
-  const functionPrefix = process.env.FUNCTION_PREFIX || `${SERVICE}-${STAGE}`;
+  const stackName = process.env.STACK_NAME;
+  const functionPrefix = process.env.FUNCTION_PREFIX;
+  if (!stackName || !functionPrefix) {
+    console.error("Set STACK_NAME and FUNCTION_PREFIX env vars (matching your deploy.config.<name>.json's stackName/functionNamePrefix).");
+    process.exit(1);
+  }
   wireCognito({ stackName, functionPrefix }).catch((err) => {
     console.error("ERROR:", err?.message || err);
     process.exit(1);

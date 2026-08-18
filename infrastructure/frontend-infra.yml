@@ -15,7 +15,6 @@ Parameters:
     Description: Route 53 hosted zone ID that owns DomainName.
   SiteBucket:
     Type: String
-    Default: schuit-sharing
     Description: Name of the *existing* S3 bucket that will host the SPA. Bucket must already exist.
   SitePrefix:
     Type: String

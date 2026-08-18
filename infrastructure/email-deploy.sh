@@ -2,8 +2,8 @@
 # Deploys the SES email-infra CloudFormation stack.
 #
 # What this does:
-#   - Looks up the Route 53 hosted zone for the parent domain (default
-#     schuit.io) the same way deploy.sh does.
+#   - Looks up the Route 53 hosted zone for the parent domain (yours -- no
+#     default, see DOMAIN below) the same way deploy.sh does.
 #   - Deploys email-infra.yml in us-east-1, which creates an SES domain
 #     identity for that domain plus the DKIM CNAMEs and MAIL FROM MX/SPF
 #     records on a subdomain (default: mail.${DOMAIN}).
@@ -14,21 +14,21 @@
 #     SES console) to poll status. Typical wait is 5–60 minutes.
 #   - The SES account is in *sandbox* mode by default. Until production
 #     access is requested + granted, sends only succeed to verified
-#     recipient addresses (e.g. riley.schuit@gmail.com — verify via the
-#     console first if testing in sandbox).
+#     recipient addresses (verify your own inbox via the console first if
+#     testing in sandbox).
 #
 # Usage:
-#   ./email-deploy.sh
-#   DOMAIN=schuit.io PARENT_ZONE=schuit.io ./email-deploy.sh
+#   DOMAIN=your-domain.example ./email-deploy.sh
+#   DOMAIN=your-domain.example PARENT_ZONE=your-domain.example ./email-deploy.sh
 #   PROFILE=my-aws-profile ./email-deploy.sh
 
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-schuit.io}"
+DOMAIN="${DOMAIN:?Set DOMAIN, e.g. DOMAIN=your-domain.example ./email-deploy.sh}"
 PARENT_ZONE="${PARENT_ZONE:-$DOMAIN}"
 MAIL_FROM_SUB="${MAIL_FROM_SUB:-mail}"
 REGION="${REGION:-us-east-1}"
-STACK_NAME="${STACK_NAME:-schuit-sharing-email}"
+STACK_NAME="${STACK_NAME:-email-infra}"
 
 PROFILE_FLAG=""
 if [[ -n "${PROFILE:-}" ]]; then
@@ -91,13 +91,14 @@ Next steps:
 
   2. SES sandbox: until production access is granted, only verified
      recipients can receive mail. Verify your test recipient (one-time):
-       aws ses verify-email-identity --region $REGION --email-address riley.schuit@gmail.com
+       aws ses verify-email-identity --region $REGION --email-address you@example.com
 
   3. Request production access (one-click form) in the console:
        https://console.aws.amazon.com/ses/home?region=$REGION#/account
 
   4. Backend Lambdas pick up the env vars MAIL_FROM and MAIL_REGION from
-     serverless.yml; redeploy the backend so the new IAM grant + envs land:
-       cd ../backend && npx serverless deploy --stage prod
+     your deploy.config.<name>.json (mailFrom/mailRegion); redeploy the
+     backend so the new IAM grant + envs land:
+       cd ../backend && node scripts/deploy.mjs deploy.config.<name>.json
 
 EOF

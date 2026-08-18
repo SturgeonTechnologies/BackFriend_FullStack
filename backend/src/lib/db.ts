@@ -29,7 +29,7 @@ export interface InviteRow {
 
 export interface MountRow {
   mountPath: string;   // e.g. "roms"
-  bucket: string;      // e.g. "schuit-sharing"
+  bucket: string;      // e.g. "your-bucket"
   prefix: string;      // e.g. "Video_Game_ROMs/"  (always ends with "/")
   displayName: string; // e.g. "Video Game ROMs"
   description?: string;

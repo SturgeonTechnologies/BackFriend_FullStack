@@ -6,12 +6,12 @@
 # exists, `node ../backend/scripts/deploy.mjs` builds + syncs the SPA to it
 # on every deploy (see the "frontend" block in deploy.config.<name>.json).
 #
-# The SPA is served from an existing bucket (default: schuit-sharing) under
-# a prefix (default: web). Override with SITE_BUCKET / SITE_PREFIX /
-# SITE_BUCKET_REGION env vars.
+# The SPA is served from an existing bucket (yours -- no default, see
+# SITE_BUCKET below) under a prefix (default: web). Override with
+# SITE_BUCKET / SITE_PREFIX / SITE_BUCKET_REGION env vars.
 #
 # Usage:
-#   DOMAIN=your-domain.example PARENT_ZONE=your-domain.example ./deploy.sh
+#   DOMAIN=your-domain.example PARENT_ZONE=your-domain.example SITE_BUCKET=your-bucket ./deploy.sh
 #   PROFILE=my-aws-profile ./deploy.sh
 #   SITE_BUCKET=my-bucket SITE_PREFIX=app ./deploy.sh
 
@@ -19,8 +19,8 @@ set -euo pipefail
 
 DOMAIN="${DOMAIN:?Set DOMAIN, e.g. DOMAIN=your-domain.example ./deploy.sh}"
 PARENT_ZONE="${PARENT_ZONE:-$DOMAIN}"
-STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
-SITE_BUCKET="${SITE_BUCKET:-schuit-sharing}"
+STACK_NAME="${STACK_NAME:-frontend-infra}"
+SITE_BUCKET="${SITE_BUCKET:?Set SITE_BUCKET to your shares bucket, e.g. SITE_BUCKET=your-bucket ./deploy.sh}"
 SITE_PREFIX="${SITE_PREFIX:-web}"
 SITE_BUCKET_REGION="${SITE_BUCKET_REGION:-us-east-1}"
 
