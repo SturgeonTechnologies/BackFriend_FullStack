@@ -197,6 +197,19 @@ export function exploreUnsetPublic(idToken: string, key: string) {
   return request<{ public: boolean }>(`/admin/explore/public?${qs}`, { method: "DELETE", idToken });
 }
 
+// ----- Public backend discovery (unauthenticated) -----
+export interface PublicConfig {
+  name?: string;
+  cognitoDomain?: string;
+  cognitoClientId?: string;
+  googleEnabled: boolean;
+  facebookEnabled: boolean;
+}
+/** Which sign-in providers this deployment actually has configured -- used to hide Login's Google/Facebook buttons when they'd otherwise dead-end at a Cognito error. */
+export function getPublicConfig() {
+  return request<PublicConfig>("/config");
+}
+
 // ----- Browse (any authenticated user) -----
 export function listMounts(idToken: string) {
   return request<{ mounts: Mount[] }>("/mounts", { idToken });

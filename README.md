@@ -56,7 +56,11 @@ flag to skip that part.
 
 - Auth: **Cognito** — sign in with **Google**, **Facebook**, *or* **email + password**
   (all via the Cognito hosted UI; email/password users self-register through the invite
-  gate and verify their address with a one-time code)
+  gate and verify their address with a one-time code). Email/password always works;
+  the Google/Facebook buttons only appear on the Login page once you've actually
+  configured that provider (step 1) — the frontend checks `GET /config` at load and
+  hides whichever ones aren't wired up, rather than showing a button that dead-ends
+  at a Cognito error.
 - First admin(s): whichever email(s) you list in `bootstrapAdminEmails` in your deploy config —
   they're auto-promoted to admin on first sign-in, no manual setup needed
 - Admins invite other users by email; invitees go to the site and "Sign in with

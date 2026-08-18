@@ -13,5 +13,7 @@ export const handler: APIGatewayProxyHandlerV2 = async () => {
     name: process.env.APP_DISPLAY_NAME,
     cognitoDomain: process.env.COGNITO_DOMAIN,
     cognitoClientId: process.env.COGNITO_CLIENT_ID,
+    googleEnabled: process.env.GOOGLE_ENABLED === "true",
+    facebookEnabled: process.env.FACEBOOK_ENABLED === "true",
   });
 };

@@ -843,6 +843,14 @@ Resources:
             - !Sub "https://${CognitoCustomDomain}"
             - !Sub "https://${ResourcePrefix}-${Stage}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
           COGNITO_CLIENT_ID: !Ref UserPoolClientMobile
+          # HasGoogle/HasFacebook (not CreateGoogle/CreateFacebook) on purpose:
+          # in adopt mode CreateDataPlane is false so CreateGoogle/CreateFacebook
+          # are always false even though the adopted pool already has the IdP
+          # wired up. HasGoogle/HasFacebook just reflect whether a client id
+          # was passed to *this* deploy, which is what actually gates whether
+          # sign-in with that provider works right now, in either mode.
+          GOOGLE_ENABLED: !If [HasGoogle, "true", "false"]
+          FACEBOOK_ENABLED: !If [HasFacebook, "true", "false"]
       Events:
         Api:
           Type: HttpApi
