@@ -49,7 +49,11 @@ const rl = createInterface({ input: stdin, output: stdout });
 // --google/--no-google, --facebook/--no-facebook,
 // --deploy-backend/--no-deploy-backend, --deploy-frontend/--no-deploy-frontend,
 // --deploy-ses/--no-deploy-ses, --redeploy-after-ses/--no-redeploy-after-ses,
-// --overwrite/--no-overwrite, --yes (accept the default for anything else unanswered)
+// --overwrite/--no-overwrite, --confirm-new-bucket (skip the fresh-bucket
+// naming-collision warning), --yes (accept the default for anything else
+// unanswered -- note --yes alone does NOT skip --confirm-new-bucket, since
+// that warning defaults to "no" on purpose; pass both explicitly for a fully
+// unattended run of a space you're sure is new)
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -184,8 +188,26 @@ function bucketRegion(bucket) {
   }
 }
 
-function ensureBucketInRegion(bucket, region, label) {
+async function ensureBucketInRegion(bucket, region, label) {
   if (!bucketExists(bucket, region)) {
+    // This name is fully deterministic (space name + account id, or just the
+    // space name for sharesBucket) -- there's no way to tell from here
+    // whether some OTHER deployment (this repo checked out elsewhere, or a
+    // different space whose name happens to compute the same bucket) is
+    // relying on this exact name already. Silently claiming it is exactly
+    // what caused a real incident: a second checkout's quickstart run
+    // recreated a bucket a live prod config still pointed at, in the wrong
+    // region, breaking that deploy. Make it a real decision point instead.
+    console.log(
+      `\n    ${label} bucket "${bucket}" doesn't exist yet -- would create it fresh in ${region}.\n` +
+      `    Its name is deterministic, so if any other deployment (a different checkout of this\n` +
+      `    repo, or another space whose name computes the same bucket) already expects this\n` +
+      `    exact name, creating it here claims it out from under that config.`,
+    );
+    if (!(await askYesNo(`    Create "${bucket}" fresh in ${region}?`, false, presetBool("confirm-new-bucket")))) {
+      console.error(`\nAborted -- rerun with --confirm-new-bucket once you're sure this name is actually free.`);
+      process.exit(1);
+    }
     createBucket(bucket, region);
     return;
   }
@@ -304,10 +326,10 @@ async function main() {
   const stackName = `${spaceName}-sam`;
 
   console.log(`\n==> Ensuring artifact bucket ${artifactBucket} exists`);
-  ensureBucketInRegion(artifactBucket, region, "Artifact");
+  await ensureBucketInRegion(artifactBucket, region, "Artifact");
 
   console.log(`==> Ensuring shares bucket ${sharesBucket} exists`);
-  ensureBucketInRegion(sharesBucket, region, "Shares");
+  await ensureBucketInRegion(sharesBucket, region, "Shares");
 
   const oauth = {};
   console.log("\nOAuth sign-in (optional -- skip for email/password-only; you can add these later by editing the config and redeploying).");
@@ -441,6 +463,7 @@ async function main() {
         });
         config.mailFrom = `noreply@${domain}`;
         config.mailRegion = "us-east-1";
+        config.email = { stackName: emailStack };
         writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
         console.log(`\nDKIM verification is asynchronous (5-60 min). Check status:`);
         console.log(`  aws ses get-identity-verification-attributes --region us-east-1 --identities ${domain} --query 'VerificationAttributes."${domain}".VerificationStatus' --output text`);

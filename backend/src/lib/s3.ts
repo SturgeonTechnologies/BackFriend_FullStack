@@ -4,7 +4,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-export const s3 = new S3Client({});
+// Pin the region explicitly when SharesBucket lives outside this stack's own
+// region -- a client for one region gets PermanentRedirect errors on every
+// call to a bucket in another.
+export const s3 = new S3Client(
+  process.env.SHARES_BUCKET_REGION ? { region: process.env.SHARES_BUCKET_REGION } : {},
+);
 
 export interface S3Object { key: string; size: number; lastModified?: string; }
 

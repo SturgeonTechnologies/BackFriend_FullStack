@@ -13,6 +13,8 @@
   "artifactBucket": "your-space-name-sam-artifacts-<your-aws-account-id>",
 
   "sharesBucket": "your-space-name",
+  "$comment_sharesBucketRegion": "Only needed when sharesBucket lives in a different region than this config's 'region' above -- omit it otherwise.",
+  "sharesBucketRegion": "",
   "siteOrigin": "https://your-domain.example",
   "allowedOrigins": ["https://your-domain.example"],
   "appDisplayName": "My Sharing Space",
@@ -25,6 +27,10 @@
   "bootstrapAdminEmails": ["you@example.com"],
   "mailFrom": "noreply@your-domain.example",
   "mailRegion": "us-east-1",
+  "$comment_email": "Only present when the SES email stack (README step 4b) was deployed for this space -- teardown.mjs reads this to find and delete it by name, same as it does for 'frontend' below. Omit entirely if you never ran step 4b.",
+  "email": {
+    "stackName": "your-space-name-email"
+  },
 
   "webCallbackUrls": ["http://localhost:5173/auth/callback", "https://your-domain.example/auth/callback"],
   "webLogoutUrls": ["http://localhost:5173/", "https://your-domain.example/"],

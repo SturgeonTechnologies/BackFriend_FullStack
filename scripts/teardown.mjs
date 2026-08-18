@@ -86,16 +86,18 @@ async function askYesNo(question, defaultYes = false) {
   return answer.startsWith("y");
 }
 
-function stackStatus(stackName, region) {
+function stackInfo(stackName, region) {
   try {
-    const status = runQuiet("aws", [
+    const out = runQuiet("aws", [
       "cloudformation", "describe-stacks",
       "--region", region,
       "--stack-name", stackName,
-      "--query", "Stacks[0].StackStatus",
+      "--query", "Stacks[0].[StackStatus,CreationTime]",
       "--output", "text",
     ], { stdio: "pipe" }).trim();
-    return status && status !== "None" ? status : null;
+    if (!out) return null;
+    const [status, creationTime] = out.split(/\s+/);
+    return status && status !== "None" ? { status, creationTime } : null;
   } catch {
     return null;
   }
@@ -137,7 +139,13 @@ async function main() {
   if (config) {
     console.log(`Found ${configPath} (this file won't be deleted -- remove it by hand once you're done).`);
   } else {
-    console.log(`No deploy.config.${space}.json found -- going by naming convention only (<space>-sam / -frontend / -email).`);
+    console.log(
+      `No deploy.config.${space}.json found -- going by naming convention only (<space>-sam / -frontend /\n` +
+      `-email). These are GUESSES: if "${space}" happens to match another deployment's stack name (this\n` +
+      `repo checked out elsewhere, or a different space that computes the same name), this could target\n` +
+      `real resources that aren't yours to tear down. Each guessed target below will ask you to confirm\n` +
+      `its creation date looks right before deleting it.`,
+    );
   }
 
   if (looksProd) {
@@ -154,7 +162,7 @@ async function main() {
 
   const backendStack = config?.stackName ?? `${space}-sam`;
   const frontendStack = config?.frontend?.distributionStackName ?? `${space}-frontend`;
-  const emailStack = `${space}-email`;
+  const emailStack = config?.email?.stackName ?? `${space}-email`;
   const sharesBucket = config?.sharesBucket ?? space;
   const artifactBucket = config?.artifactBucket;
 
@@ -177,12 +185,24 @@ async function main() {
 
   for (const t of targets) {
     console.log(`\n==> ${t.label}: ${t.stack}`);
-    const status = stackStatus(t.stack, t.region);
-    if (!status) {
+    const info = stackInfo(t.stack, t.region);
+    if (!info) {
       console.log("    not found, skipping.");
       continue;
     }
-    console.log(`    found (${status}), deleting...`);
+    console.log(`    found (${info.status}), created ${info.creationTime}`);
+    // Only the config-driven path is trusted by construction (you typed the
+    // space name and it matched a real config file). A guessed name matching
+    // a real stack is exactly the failure mode that nearly deleted the wrong
+    // live frontend stack during testing -- ask before touching it.
+    if (!config) {
+      console.log(`    !! This name was GUESSED (no deploy.config.${space}.json) -- confirm the creation date above is really yours.`);
+      if (!boolFlag("yes") && !(await askYesNo(`    Delete ${t.stack}?`, false))) {
+        console.log("    Skipped.");
+        continue;
+      }
+    }
+    console.log("    deleting...");
     deleteStack(t.stack, t.region);
   }
 

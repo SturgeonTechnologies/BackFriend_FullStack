@@ -29,6 +29,16 @@ Parameters:
     Type: String
     Description: Name of the (external, not managed here) S3 bucket that mounts read/write.
 
+  SharesBucketRegion:
+    Type: String
+    Default: ""
+    Description: >
+      Region SharesBucket actually lives in, only needed when it differs from
+      this stack's own region -- the S3 SDK client needs to be pinned there
+      explicitly, since a client for one region gets a PermanentRedirect
+      error talking to a bucket in another. Leave blank when SharesBucket is
+      in the same region as this stack.
+
   SiteOrigin:
     Type: String
     Default: http://localhost:5173
@@ -215,6 +225,7 @@ Globals:
         ADMIN_GROUP: admins
         BOOTSTRAP_ADMIN_EMAILS: !Ref BootstrapAdminEmails
         SHARES_BUCKET: !Ref SharesBucket
+        SHARES_BUCKET_REGION: !Ref SharesBucketRegion
         SITE_ORIGIN: !Ref SiteOrigin
         MAIL_FROM: !Ref MailFrom
         MAIL_REGION: !Ref MailRegion
@@ -350,6 +361,12 @@ Resources:
   ApiCustomDomainMapping:
     Type: AWS::ApiGatewayV2::ApiMapping
     Condition: HasApiCustomDomain
+    # Stage is the literal "$default" rather than a !Ref/!GetAtt to SAM's
+    # auto-generated HttpApiApiGatewayDefaultStage resource, so CloudFormation
+    # can't infer the dependency on its own -- without this, a stack delete
+    # can try to delete the Stage before this mapping is gone, and API
+    # Gateway rejects that ("remove all base path mappings" on the stage).
+    DependsOn: HttpApiApiGatewayDefaultStage
     Properties:
       ApiId: !Ref HttpApi
       DomainName: !Ref ApiCustomDomainName

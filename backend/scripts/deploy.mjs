@@ -133,6 +133,7 @@ async function main() {
   const setIf = (key, value) => {
     if (value !== undefined && value !== null && value !== "") paramOverrides[key] = value;
   };
+  setIf("SharesBucketRegion", cfg.sharesBucketRegion);
   setIf("SiteOrigin", cfg.siteOrigin);
   setIf("AllowedOrigins", cfg.allowedOrigins && csv(cfg.allowedOrigins));
   setIf("AppDisplayName", cfg.appDisplayName);
