@@ -3,17 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "deploy": "serverless deploy",
-    "deploy:prod": "serverless deploy --stage prod",
     "wire-triggers": "node scripts/wire-cognito-triggers.mjs",
-    "wire-triggers:prod": "STAGE=prod node scripts/wire-cognito-triggers.mjs",
-    "remove": "serverless remove",
-    "logs": "serverless logs -f",
     "typecheck": "tsc --noEmit",
     "sam:validate": "sam validate --lint --config-env samtest",
     "sam:build": "sam build --config-env samtest",
     "sam:deploy:test": "sam build --config-env samtest && sam deploy --config-env samtest",
-    "sam:wire:test": "cross-env STAGE=samtest AWS_REGION=us-east-1 node scripts/wire-cognito-triggers.mjs",
+    "sam:wire:test": "cross-env STAGE=samtest AWS_REGION=us-east-1 STACK_NAME=schuit-sharing-samtest FUNCTION_PREFIX=schuit-sharing-samtest node scripts/wire-cognito-triggers.mjs",
     "sam:delete:test": "sam delete --config-env samtest"
   },
   "dependencies": {
@@ -31,8 +26,6 @@
     "@types/aws-lambda": "^8.10.140",
     "@types/node": "^20.14.0",
     "cross-env": "^7.0.3",
-    "serverless": "^3.38.0",
-    "serverless-esbuild": "^1.52.0",
     "typescript": "^5.4.0"
   }
 }

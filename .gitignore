@@ -6,12 +6,6 @@ build/
 .parcel-cache/
 coverage/
 
-# Serverless
-.serverless/
-.esbuild/
-.webpack/
-.dynamodb/
-
 # Env / secrets
 .env
 .env.local
