@@ -30,8 +30,13 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     if (!mount) return error(404, "Mount not found");
     if (!canSeeMount(caller, mount)) return error(403, "Forbidden");
 
+    // 1hr, not the 5min default -- this URL also feeds inline video/audio
+    // preview and thumbnailing (FileThumb/MediaPlayer), which need enough
+    // headroom to actually watch/scrub something without the link expiring
+    // mid-playback.
+    const expiresInSeconds = 3600;
     const key = mount.prefix + rel;
-    const url = await presignGet(mount.bucket, key, 300);
+    const url = await presignGet(mount.bucket, key, expiresInSeconds);
 
     console.log(JSON.stringify({
       evt: "download",
@@ -42,7 +47,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
 
     return ok({
       downloadUrl: url,
-      expiresInSeconds: 300,
+      expiresInSeconds,
       filename: rel.split("/").pop(),
     });
   } catch (e) {

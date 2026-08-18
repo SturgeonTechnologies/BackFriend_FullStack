@@ -23,8 +23,13 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     const key = String(event.queryStringParameters?.key ?? "").replace(/^\/+/, "");
     if (!validKey(key)) return error(400, "A valid file key is required");
 
-    const url = await presignGet(bucket, key, 300);
-    return ok({ downloadUrl: url, expiresInSeconds: 300, filename: key.split("/").pop() });
+    // 1hr, not the 5min default -- this URL also feeds inline video/audio
+    // preview and thumbnailing (FileThumb/MediaPlayer), which need enough
+    // headroom to actually watch/scrub something without the link expiring
+    // mid-playback.
+    const expiresInSeconds = 3600;
+    const url = await presignGet(bucket, key, expiresInSeconds);
+    return ok({ downloadUrl: url, expiresInSeconds, filename: key.split("/").pop() });
   } catch (e: any) {
     if (e.statusCode) return error(e.statusCode, e.message);
     console.error(e);

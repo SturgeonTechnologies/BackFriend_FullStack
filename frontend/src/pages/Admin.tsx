@@ -8,6 +8,9 @@ import {
 import { useAuth } from "../lib/auth";
 import { TrashIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
+import { FileThumb } from "../components/FileThumb";
+import { MediaPlayer } from "../components/MediaPlayer";
+import { categoryFor } from "../lib/fileTypes";
 
 export default function Admin() {
   return (
@@ -224,9 +227,14 @@ function parentPrefix(p: string): string {
   return i >= 0 ? t.slice(0, i + 1) : "";
 }
 
-// Public / Download / Delete controls for a file in the bucket explorer,
-// addressed by full S3 key (admin-only). Mirrors Browse.tsx's PublicCell.
-function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted: () => void }) {
+// Public / Download / Play / Delete controls for a file in the bucket
+// explorer, addressed by full S3 key (admin-only). Mirrors Browse.tsx's
+// PublicCell.
+function ExplorerFileActions({
+  file, onDeleted, onPlay, playable,
+}: {
+  file: ExploreFile; onDeleted: () => void; onPlay: () => void; playable: boolean;
+}) {
   const { idToken } = useAuth();
   const [isPublic, setIsPublic] = useState(!!file.public);
   const [url, setUrl] = useState<string | undefined>(file.publicUrl);
@@ -265,6 +273,7 @@ function ExplorerFileActions({ file, onDeleted }: { file: ExploreFile; onDeleted
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
       <PublicButton isPublic={isPublic} busy={busy} copied={copied} onToggle={togglePublic} onCopy={copy} />
+      {playable && <button type="button" onClick={onPlay}>▶ Play</button>}
       <button type="button" onClick={download}>Download</button>
       <button type="button" className="danger" onClick={remove} title="Delete file" aria-label={`Delete ${file.name}`}
         style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}>
@@ -369,6 +378,7 @@ function MountsCard() {
   const [expPrefix, setExpPrefix] = useState("");
   const [expErr, setExpErr] = useState<string | null>(null);
   const [expLoading, setExpLoading] = useState(false);
+  const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   // "Create directory" popup state.
@@ -405,6 +415,16 @@ function MountsCard() {
       setExpPrefix(r.prefix);
     } catch (e: any) { setExpErr(e.message); }
     finally { setExpLoading(false); }
+  };
+
+  const playExploreFile = async (f: ExploreFile, kind: "video" | "audio") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await exploreDownloadUrl(idToken, f.path);
+      setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
+    }
   };
 
   const handleCreateDir = async (e: React.FormEvent) => {
@@ -663,14 +683,35 @@ function MountsCard() {
                 </td>
               </tr>
             ))}
-            {exp?.files.map((f) => (
-              <tr key={f.path}>
-                <td className="muted">📄 {f.name}</td>
-                <td className="muted">file</td>
-                <td className="muted">{formatSize(f.size)}</td>
-                <td><ExplorerFileActions file={f} onDeleted={() => loadExplore(expPrefix)} /></td>
-              </tr>
-            ))}
+            {exp?.files.map((f) => {
+              const cat = categoryFor(f.name);
+              const playable = cat === "video" || cat === "audio";
+              return (
+                <tr key={f.path}>
+                  <td className="muted">
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <FileThumb
+                        category={cat}
+                        name={f.name}
+                        loadUrl={() => exploreDownloadUrl(idToken!, f.path).then((r) => r.downloadUrl)}
+                        onPlay={playable ? () => playExploreFile(f, cat as "video" | "audio") : undefined}
+                      />
+                      {f.name}
+                    </div>
+                  </td>
+                  <td className="muted">file</td>
+                  <td className="muted">{formatSize(f.size)}</td>
+                  <td>
+                    <ExplorerFileActions
+                      file={f}
+                      onDeleted={() => loadExplore(expPrefix)}
+                      onPlay={() => playExploreFile(f, cat as "video" | "audio")}
+                      playable={playable}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
             {exp && !exp.folders.length && !exp.files.length && (
               <tr><td colSpan={4} className="muted">This directory is empty.</td></tr>
             )}
@@ -800,6 +841,9 @@ function MountsCard() {
             </div>
           </form>
         </div>
+      )}
+      {playing && (
+        <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
       )}
     </>
   );

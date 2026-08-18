@@ -70,6 +70,7 @@ flag to skip that part.
 - **Invites/Access** — invite users; the list shows everyone with access (active users + pending invites).
 - **Admin bucket explorer** — browse the raw bucket, **create** a directory, **delete** a directory (type-name + "confirm" guard), and per-file Public / Download / Delete.
 - **Browse** any mount you can see: **download** (presigned), **upload** files, admins can **delete**, and admins can toggle a file **Public** (opaque token → presigned redirect, revocable, bucket stays private).
+- **Image/video thumbnails and an in-browser player** — image and video files (detected by extension) get a lazy-loaded thumbnail in Browse, the admin explorer, and search results; clicking a video or audio file opens it in a streaming player instead of forcing a download (useful on mobile, where triggering a file download is often awkward).
 - **Global file search** across every mount you can access.
 - **Profile** page + a user dropdown menu.
 
@@ -169,23 +170,23 @@ schuit-sharing/
 ```bash
 # --- Google ---
 aws ssm put-parameter \
-  --name /schuit-sharing/prod/google/client_id \
+  --name /slapchop/prod/google/client_id \
   --type String \
   --value '<google-client-id>'
 
 aws ssm put-parameter \
-  --name /schuit-sharing/prod/google/client_secret \
+  --name /slapchop/prod/google/client_secret \
   --type SecureString \
   --value '<google-client-secret>'
 
 # --- Facebook (client_id = App ID, client_secret = App Secret) ---
 aws ssm put-parameter \
-  --name /schuit-sharing/prod/facebook/client_id \
+  --name /slapchop/prod/facebook/client_id \
   --type String \
   --value '<facebook-app-id>'
 
 aws ssm put-parameter \
-  --name /schuit-sharing/prod/facebook/client_secret \
+  --name /slapchop/prod/facebook/client_secret \
   --type SecureString \
   --value '<facebook-app-secret>'
 ```
@@ -316,7 +317,7 @@ HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
 
 aws cloudformation deploy \
   --region us-east-1 \
-  --stack-name schuit-sharing-frontend \
+  --stack-name your-space-name-frontend \
   --template-file infrastructure/frontend-infra.yml \
   --parameter-overrides \
       DomainName=your-domain.example \
@@ -369,7 +370,7 @@ Or manually:
 HOSTED_ZONE_ID=ZXXXXXXXXXXXXX
 aws cloudformation deploy \
   --region us-east-1 \
-  --stack-name schuit-sharing-email \
+  --stack-name your-space-name-email \
   --template-file infrastructure/email-infra.yml \
   --parameter-overrides \
       Domain=your-domain.example \
@@ -623,24 +624,37 @@ build+sync+invalidation.
 
 **One-time setup:**
 
-1. Create the deploy role (the only step needing your hands, since it grants deploy access):
+1. Create the deploy role (the only step needing your hands, since it grants deploy access).
+   `infrastructure/github-oidc.yml`'s IAM policy resource ARNs (CloudFormation
+   stack, Lambda, DynamoDB, log groups, SSM path, the serverless deployment
+   bucket) and its role name are all derived from `ResourcePrefix`/`Stage`
+   parameters — pass the same `resourcePrefix`/`stage` values you used (or
+   will use) in your `deploy.config.<name>.json` so the role actually has
+   permission to touch your stack's resources:
    ```bash
    aws cloudformation deploy \
      --region us-east-1 \
-     --stack-name schuit-sharing-gha \
+     --stack-name your-space-name-gha \
      --template-file infrastructure/github-oidc.yml \
-     --capabilities CAPABILITY_NAMED_IAM
+     --capabilities CAPABILITY_NAMED_IAM \
+     --parameter-overrides ResourcePrefix=your-space-name Stage=prod
    ```
+   The defaults (`schuit-sharing`/`prod`) match this project's own
+   deployment, so omitting `--parameter-overrides` entirely is only correct
+   if you kept those same names. The role is named
+   `<ResourcePrefix>-gha-deploy` unless you also override `RoleName`.
 2. Add a repo secret named `DEPLOY_CONFIG_PROD` containing your real
    `deploy.config.<name>.json` file's full contents (secrets that need
    real OAuth client secrets pulled from SSM still work fine — the deploy
    role just needs `ssm:GetParameter` on those paths, which it already has).
 
-The CloudFormation deploy above creates `schuit-sharing-gha-deploy`, trusted
-only by your fork's `<owner>/schuit-sharing` on `main` (via your account's
-GitHub OIDC provider). Update the role ARN referenced in `deploy.yml` to
-match your fork before relying on it. After the role exists and the secret's
-set, push to `main` (or run the workflow manually from the Actions tab).
+The CloudFormation deploy above creates `<ResourcePrefix>-gha-deploy`
+(`schuit-sharing-gha-deploy` with the defaults), trusted only by your fork's
+`<owner>/<your-repo-name>` on `main` (via your account's GitHub OIDC
+provider). Update the role ARN referenced in `deploy.yml` to match your
+fork's role name before relying on it. After the role exists and the
+secret's set, push to `main` (or run the workflow manually from the Actions
+tab).
 
 > The role's policy is scoped by resource for S3/IAM/SSM/CloudFront/DynamoDB but
 > broad (service-level) for CloudFormation/Lambda/API Gateway/Cognito, which are
@@ -655,7 +669,7 @@ set, push to `main` (or run the workflow manually from the Actions tab).
 - **Cognito is the trust boundary.** The API Gateway JWT authorizer validates every request. Lambdas extract `email`, `sub`, and `cognito:groups` from verified claims.
 - **Provisioning runs in the `preTokenGen` trigger**, not `postAuth` — the Post Authentication trigger does *not* fire for hosted-UI/federated sign-ins, so admin-bootstrap, group assignment, and invite-redemption live in Pre Token Generation (which does fire) and it overrides `cognito:groups` so the current token is correct.
 - **Invites live in DynamoDB with TTL**; expired rows are removed automatically by DynamoDB TTL.
-- **Bucket is fully private.** S3 **Public Access Block is on** (legacy public object ACLs are ignored). Authenticated downloads are 5-minute presigned GETs minted per-request (logged to CloudWatch with caller email, mount, key). The only public path is an explicit per-file share: an opaque token in `public-shares` that the unauthenticated `/public/{token}` endpoint resolves to a fresh presigned GET (revocable).
+- **Bucket is fully private.** S3 **Public Access Block is on** (legacy public object ACLs are ignored). Authenticated downloads are 1-hour presigned GETs minted per-request (logged to CloudWatch with caller email, mount, key) — long enough to stream/scrub a video via the in-browser player without the link expiring mid-playback. The public per-file share resolver (`/public/{token}`) still mints its own separate 5-minute presigned GET. The only public path is that explicit per-file share: an opaque token in `public-shares` that the unauthenticated `/public/{token}` endpoint resolves to a fresh presigned GET (revocable).
 - **Writes are code-gated.** Upload/create-dir/delete use `s3:PutObject`/`s3:DeleteObject` on the shares bucket, restricted in code to a mount's prefix (with `..`/`\` traversal guards). File/directory **delete is admin-only**; the bucket is unversioned so deletes are permanent.
 - **Directory traversal** (`..`, `\`) is rejected in `backend/src/lib/mounts.ts` and the explorer/upload/delete handlers.
 - **CloudFront → S3** uses OAC; the bucket policy allows only the distribution. **CloudFront → API** uses `AllViewerExceptHostHeader` so `Authorization` is forwarded and Host is rewritten to API Gateway.

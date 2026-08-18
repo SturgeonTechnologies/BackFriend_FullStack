@@ -8,6 +8,9 @@ import {
 import { useAuth } from "../lib/auth";
 import { TrashIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
+import { FileThumb } from "../components/FileThumb";
+import { MediaPlayer } from "../components/MediaPlayer";
+import { categoryFor } from "../lib/fileTypes";
 
 function fmtBytes(n: number) {
   if (!n) return "—";
@@ -91,6 +94,7 @@ export default function Browse() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -118,6 +122,16 @@ export default function Browse() {
       window.location.assign(downloadUrl);
     } catch (e: any) {
       alert(e.message ?? "Download failed");
+    }
+  };
+
+  const play = async (f: BrowseFile, kind: "video" | "audio") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, mountPath, f.path);
+      setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
     }
   };
 
@@ -201,13 +215,31 @@ export default function Browse() {
               <td></td>
             </tr>
           ))}
-          {files.map((f) => (
+          {files.map((f) => {
+            const cat = categoryFor(f.name);
+            const playable = cat === "video" || cat === "audio";
+            return (
             <tr key={`f-${f.path}`}>
-              <td>📄 {f.name}</td>
+              <td>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <FileThumb
+                    category={cat}
+                    name={f.name}
+                    loadUrl={() => getDownloadUrl(idToken!, mountPath, f.path).then((r) => r.downloadUrl)}
+                    onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+                  />
+                  <span>{f.name}</span>
+                </div>
+              </td>
               <td>{fmtBytes(f.size)}</td>
               <td className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
                 {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
+                {playable && (
+                  <button type="button" onClick={() => play(f, cat as "video" | "audio")} style={{ marginRight: 8 }}>
+                    ▶ Play
+                  </button>
+                )}
                 <button onClick={() => download(f.path)}>Download</button>
                 {isAdmin && (
                   <button
@@ -223,12 +255,16 @@ export default function Browse() {
                 )}
               </td>
             </tr>
-          ))}
+            );
+          })}
           {!loading && !folders.length && !files.length && (
             <tr><td colSpan={4} className="muted" style={{ padding: "1rem" }}>Empty directory.</td></tr>
           )}
         </tbody>
       </table>
+      {playing && (
+        <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
     </div>
   );
 }

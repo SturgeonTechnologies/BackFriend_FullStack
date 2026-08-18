@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listMounts, searchFiles, getDownloadUrl, Mount, SearchResult } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { FileThumb } from "../components/FileThumb";
+import { MediaPlayer } from "../components/MediaPlayer";
+import { categoryFor } from "../lib/fileTypes";
 
 function fmtBytes(n: number) {
   if (!n) return "—";
@@ -23,6 +26,7 @@ export default function Home() {
   const [truncated, setTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
 
   useEffect(() => {
     if (!idToken) return;
@@ -52,6 +56,14 @@ export default function Home() {
       const { downloadUrl } = await getDownloadUrl(idToken, mountPath, path);
       window.location.assign(downloadUrl);
     } catch (e: any) { alert(e.message ?? "Download failed"); }
+  };
+
+  const play = async (f: SearchResult, kind: "video" | "audio") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, f.mountPath, f.path);
+      setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
   return (
@@ -90,19 +102,41 @@ export default function Home() {
                   <th>Name</th><th>Directory</th><th style={{ width: 110 }}>Size</th><th style={{ width: 120 }}></th>
                 </tr></thead>
                 <tbody>
-                  {results.map((f) => (
-                    <tr key={`${f.mountPath}/${f.path}`}>
-                      <td>📄 {f.name}</td>
-                      <td className="muted">
-                        <Link to={`/browse/${encodeURIComponent(f.mountPath)}?path=${encodeURIComponent(f.path.replace(/[^/]*$/, ""))}`}>
-                          {f.mountName}
-                        </Link>
-                        {f.path.includes("/") ? <span className="muted"> / {f.path.replace(/\/[^/]*$/, "")}</span> : null}
-                      </td>
-                      <td>{fmtBytes(f.size)}</td>
-                      <td><button onClick={() => download(f.mountPath, f.path)}>Download</button></td>
-                    </tr>
-                  ))}
+                  {results.map((f) => {
+                    const cat = categoryFor(f.name);
+                    const playable = cat === "video" || cat === "audio";
+                    return (
+                      <tr key={`${f.mountPath}/${f.path}`}>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <FileThumb
+                              category={cat}
+                              name={f.name}
+                              loadUrl={() => getDownloadUrl(idToken!, f.mountPath, f.path).then((r) => r.downloadUrl)}
+                              onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+                              size={32}
+                            />
+                            {f.name}
+                          </div>
+                        </td>
+                        <td className="muted">
+                          <Link to={`/browse/${encodeURIComponent(f.mountPath)}?path=${encodeURIComponent(f.path.replace(/[^/]*$/, ""))}`}>
+                            {f.mountName}
+                          </Link>
+                          {f.path.includes("/") ? <span className="muted"> / {f.path.replace(/\/[^/]*$/, "")}</span> : null}
+                        </td>
+                        <td>{fmtBytes(f.size)}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {playable && (
+                            <button type="button" onClick={() => play(f, cat as "video" | "audio")} style={{ marginRight: 8 }}>
+                              ▶ Play
+                            </button>
+                          )}
+                          <button onClick={() => download(f.mountPath, f.path)}>Download</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </>
@@ -132,6 +166,9 @@ export default function Home() {
           </div>
         )}
       </div>
+      {playing && (
+        <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
     </div>
   );
 }
