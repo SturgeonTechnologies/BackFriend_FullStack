@@ -1,6 +1,8 @@
 # schuit-sharing
 
-An invite-only web app for browsing and downloading files (ROMs, etc.) stored in S3. Auth is
+A mostly 'vibed' full stack application to assist with sharing between messaging applications and operating systems.  
+
+An invite-only web app for browsing and downloading files stored in S3. Auth is
 **Cognito** (Google, Facebook, or email + password), access is controlled per-mount, and admins
 invite users by email. There's also a companion mobile app (Expo/React Native) that consumes the
 same backend.
