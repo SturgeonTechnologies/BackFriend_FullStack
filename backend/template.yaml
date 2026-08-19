@@ -1035,6 +1035,107 @@ Resources:
         EntryPoints:
           - src/handlers/user/uploadUrl.ts
 
+  # =========================================================================
+  # Personal archive (self-service, NOT mount-based, NOT admin-gated). Every
+  # caller can only ever read/write their own user_sharing_default/<email>/
+  # folder -- see lib/mounts.ts RESERVED_PERSONAL_PREFIX.
+  # =========================================================================
+  ArchiveUploadUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archiveUploadUrl"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archiveUploadUrl.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /archive/upload-url
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archiveUploadUrl.ts
+
+  ArchivePublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archivePublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archivePublic.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /archive/public
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archivePublic.ts
+
+  ArchiveList:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archiveList"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archiveList.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /archive/list
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archiveList.ts
+
+  ArchiveDownloadUrl:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archiveDownloadUrl"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archiveDownloadUrl.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /archive/download-url
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archiveDownloadUrl.ts
+
   DeleteFile:
     Type: AWS::Serverless::Function
     Properties:

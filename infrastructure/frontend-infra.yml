@@ -1,10 +1,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  CloudFront + ACM + Route53 for the SPA (apex domain). API is NOT proxied
-  here -- it has its own native API Gateway custom domain (see
-  backend/template.yaml ApiCustomDomain + README "Custom domains"). This
-  stack owns SiteBucket's bucket policy (the OAC grant); manage it here, not
-  out of band. Deploy in us-east-1 (CloudFront's ACM cert region requirement).
+  CloudFront + ACM + Route53 for the SPA (apex domain). The API is otherwise
+  NOT proxied here -- it has its own native API Gateway custom domain (see
+  backend/template.yaml ApiCustomDomain + README "Custom domains") -- except
+  for a single narrow /config passthrough (see ApiOriginDomain) so a client
+  (e.g. the mobile app's "add a space" screen) can discover a backend from
+  just the friendly apex URL, without needing to know the dedicated API
+  subdomain. This stack owns SiteBucket's bucket policy (the OAC grant);
+  manage it here, not out of band. Deploy in us-east-1 (CloudFront's ACM
+  cert region requirement).
 
 Parameters:
   DomainName:
@@ -24,6 +28,21 @@ Parameters:
     Type: String
     Default: us-east-1
     Description: Region where SiteBucket lives. Needed to build the correct S3 regional origin DNS name.
+  ApiOriginDomain:
+    Type: String
+    Default: ""
+    Description: >
+      Optional. Hostname only (no scheme) of the backend's API -- either the
+      raw `<id>.execute-api.<region>.amazonaws.com` (the backend stack's
+      ApiEndpoint output, scheme stripped) or its ApiCustomDomain if one is
+      set up. When set, this distribution proxies exactly one path -- GET
+      /config -- to it, so typing just the apex domain into a client's "add
+      backend" flow works without the client needing to know about (or a
+      person needing to explain) a separate API subdomain. Leave blank to
+      skip this entirely (no second origin, no extra cache behavior).
+
+Conditions:
+  HasApiOrigin: !Not [!Equals [!Ref ApiOriginDomain, ""]]
 
 Resources:
   # ---------- TLS certificate ----------
@@ -60,14 +79,25 @@ Resources:
           AcmCertificateArn: !Ref Certificate
           SslSupportMethod: sni-only
           MinimumProtocolVersion: TLSv1.2_2021
-        Origins:
-          # SPA origin: existing shared bucket, scoped to /<SitePrefix> via OriginPath.
-          - Id: s3-site
-            DomainName: !Sub "${SiteBucket}.s3.${SiteBucketRegion}.amazonaws.com"
-            OriginPath: !Sub "/${SitePrefix}"
-            S3OriginConfig:
-              OriginAccessIdentity: ""
-            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+        Origins: !If
+          - HasApiOrigin
+          - - Id: s3-site
+              DomainName: !Sub "${SiteBucket}.s3.${SiteBucketRegion}.amazonaws.com"
+              OriginPath: !Sub "/${SitePrefix}"
+              S3OriginConfig:
+                OriginAccessIdentity: ""
+              OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            - Id: api-config
+              DomainName: !Ref ApiOriginDomain
+              CustomOriginConfig:
+                OriginProtocolPolicy: https-only
+                OriginSSLProtocols: [TLSv1.2]
+          - - Id: s3-site
+              DomainName: !Sub "${SiteBucket}.s3.${SiteBucketRegion}.amazonaws.com"
+              OriginPath: !Sub "/${SitePrefix}"
+              S3OriginConfig:
+                OriginAccessIdentity: ""
+              OriginAccessControlId: !GetAtt OriginAccessControl.Id
         DefaultCacheBehavior:
           TargetOriginId: s3-site
           ViewerProtocolPolicy: redirect-to-https
@@ -83,6 +113,27 @@ Resources:
         # /assets/foo.js correctly returns 404 instead of being silently
         # rewritten to index.html (which causes the browser to parse HTML as
         # JS and the app to fail to boot).
+        CacheBehaviors: !If
+          - HasApiOrigin
+          # Exact-path passthroughs for backend discovery + public share
+          # resolution (see ApiOriginDomain above) -- deliberately just these
+          # two paths, not a general /api/* proxy, to stay out of the way of
+          # the API's own dedicated subdomain.
+          - - PathPattern: /config
+              TargetOriginId: api-config
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods: [GET, HEAD]
+              CachedMethods: [GET, HEAD]
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled -- config is tiny and fetched once per add-account, not worth caching
+            - PathPattern: /public/*
+              TargetOriginId: api-config
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods: [GET, HEAD]
+              CachedMethods: [GET, HEAD]
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled -- each token resolves to a fresh presigned URL, never cache the redirect
+          - !Ref "AWS::NoValue"
 
   # CloudFront Function (viewer-request): SPA fallback -- any request that has
   # no file extension (e.g. /admin, /browse/roms) is rewritten to /index.html
@@ -101,6 +152,15 @@ Resources:
         function handler(event) {
           var req = event.request;
           var uri = req.uri;
+
+          // Apple's Universal Links verification file: no extension, so the
+          // rule below would otherwise silently rewrite it to index.html and
+          // break Universal Links (Apple fetches this exact path and expects
+          // JSON, not HTML). It's a real file at frontend/public/.well-known/
+          // apple-app-site-association -- just needs to bypass the rewrite.
+          if (uri === '/.well-known/apple-app-site-association') {
+            return req;
+          }
 
           var lastSlash = uri.lastIndexOf('/');
           var lastSegment = uri.substring(lastSlash + 1);

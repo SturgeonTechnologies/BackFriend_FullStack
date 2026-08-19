@@ -73,7 +73,8 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
           size: f.size,
           lastModified: f.lastModified,
           public: !!shareToken,
-          publicUrl: shareToken ? `${siteOrigin}/api/public/${shareToken}` : undefined,
+          // NOT /api/public/... -- see setPublic.ts's publicUrlFor comment; same fix.
+          publicUrl: shareToken ? `${siteOrigin}/public/${shareToken}` : undefined,
         };
       }),
       truncated: res.truncated,

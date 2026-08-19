@@ -5,6 +5,33 @@ delete the line, when they're done.
 
 ## Active
 
+- [ ] **CI (GitHub Actions) should own multi-space deploys, not just prod.**
+      `.github/workflows/deploy.yml` only deploys `schuit-sharing` prod (config
+      from repo secret `DEPLOY_CONFIG_PROD`) — every other space
+      (`beeks-sharing`, future spaces) still gets deployed by hand from a dev
+      machine via `node scripts/deploy.mjs deploy.config.<name>.json`. That's
+      exactly how a real bug shipped (2026-08-18): `beeks-sharing`'s
+      `deploy.config.beeks-sharing.json` had `frontend.redirectUri` set to a
+      relative `/auth/callback` instead of an absolute URL, silently baking a
+      broken OAuth redirect into the SPA (`redirect_mismatch` on every login)
+      with nothing to catch it before it went live.
+      Rough shape: generalize `deploy.yml` into a reusable/matrix workflow keyed
+      by space name, one repo secret per space (`DEPLOY_CONFIG_<SPACE>`,
+      following the `DEPLOY_CONFIG_PROD` pattern), same OIDC role (or a
+      per-space role if blast-radius isolation matters). Manual
+      `workflow_dispatch` input to pick the space, plus push-to-main only
+      deploying the space(s) whose config secret actually changed. Would also
+      be the natural place to add a post-deploy smoke test (hit `GET /config`
+      and confirm the returned `cognitoDomain`/`cognitoClientId`/`apiBaseUrl`
+      are non-empty, maybe even a headless check that the hosted-UI authorize
+      URL doesn't immediately 400) so a config typo fails CI instead of shipping.
+      **Also worth noting from 2026-08-19:** local, uncommitted edits to this
+      repo (several infra/doc files) got silently reverted back to git HEAD
+      mid-session for unclear reasons — possibly a concurrent session/tool
+      touching the same working tree. Committing changes sooner rather than
+      leaving them uncommitted for a long working session would make this less
+      costly if it happens again.
+
 - [ ] **Migration `rom-hub-dev` → `schuit-sharing-prod`: CUTOVER DONE
       (2026-07-28); only teardown/cleanup (steps 10–11) remain.**
       The live site now runs entirely on `schuit-sharing-prod`

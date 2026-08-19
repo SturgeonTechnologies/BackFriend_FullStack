@@ -289,6 +289,15 @@ subdomain if you'd rather.
 
 The SPA lives at `s3://your-bucket/web/`. No dedicated site bucket is created — one bucket hosts both the SPA (`web/`) and the shared files (`Video_Game_ROMs/`, etc.). CloudFront's OAC is scoped to `web/*` only, so the distribution cannot serve anything outside that prefix. The API is **not** proxied through this distribution — see "Custom domains" for how it's reached instead.
 
+**Exception: `GET /config` (backend discovery).** Set `API_ORIGIN_DOMAIN` (hostname
+only, e.g. the backend stack's `ApiEndpoint` output with `https://` stripped) and
+this distribution proxies exactly that one path to the API. Without it, a client
+like the mobile app's "add a space" screen has to be told the dedicated API
+subdomain (`sharing-api.your-domain.example`) instead of just typing the friendly
+apex URL — fine for you, not realistic to expect from an invitee. This is
+deliberately narrower than the old `/api/*` proxy the domain redesign removed:
+one fixed path, not general path-based API routing.
+
 > [!CAUTION]
 > **DNS model — read this first.** **You only need the parent hosted zone**
 > (e.g. `vinceoffer.com`) — there is **no** separate hosted zone needed for a
@@ -313,7 +322,7 @@ Easiest: use the helper script (auto-discovers the hosted zone ID):
 
 ```bash
 cd infrastructure
-DOMAIN=your-domain.example ./deploy.sh
+DOMAIN=your-domain.example API_ORIGIN_DOMAIN=xxxx.execute-api.us-east-1.amazonaws.com ./deploy.sh
 ```
 
 Or run it manually:
@@ -328,6 +337,7 @@ aws cloudformation deploy \
   --parameter-overrides \
       DomainName=your-domain.example \
       HostedZoneId=$HOSTED_ZONE_ID \
+      ApiOriginDomain=xxxx.execute-api.us-east-1.amazonaws.com \
       SiteBucket=your-bucket \
       SitePrefix=web \
       SiteBucketRegion=us-east-1 \

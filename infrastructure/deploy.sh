@@ -23,6 +23,12 @@ STACK_NAME="${STACK_NAME:-frontend-infra}"
 SITE_BUCKET="${SITE_BUCKET:?Set SITE_BUCKET to your shares bucket, e.g. SITE_BUCKET=your-bucket ./deploy.sh}"
 SITE_PREFIX="${SITE_PREFIX:-web}"
 SITE_BUCKET_REGION="${SITE_BUCKET_REGION:-us-east-1}"
+# Optional: hostname only (no scheme) of the backend's API -- the backend
+# stack's ApiEndpoint output with "https://" stripped, or its ApiCustomDomain.
+# Wires up the /config passthrough (see frontend-infra.yml ApiOriginDomain)
+# so a client can discover this backend from just DOMAIN, not a separate API
+# subdomain. Leave unset to skip it.
+API_ORIGIN_DOMAIN="${API_ORIGIN_DOMAIN:-}"
 
 PROFILE_FLAG=""
 if [[ -n "${PROFILE:-}" ]]; then
@@ -68,6 +74,7 @@ aws cloudformation deploy \
       SiteBucket="$SITE_BUCKET" \
       SitePrefix="$SITE_PREFIX" \
       SiteBucketRegion="$SITE_BUCKET_REGION" \
+      ApiOriginDomain="$API_ORIGIN_DOMAIN" \
   --capabilities CAPABILITY_IAM \
   $PROFILE_FLAG
 

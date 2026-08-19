@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["D26FK4ZU9J.com.sturgeontechnologies.backfriend"],
+        "components": [{ "/": "/public/*" }]
+      }
+    ]
+  }
+}

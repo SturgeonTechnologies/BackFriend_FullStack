@@ -32,7 +32,15 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     if (!mount) return error(404, "Mount not found");
 
     const siteOrigin = process.env.SITE_ORIGIN ?? "";
-    const publicUrlFor = (token: string) => `${siteOrigin}/api/public/${token}`;
+    // NOT `${siteOrigin}/api/public/${token}` -- that was the pre-redesign
+    // convention, back when CloudFront proxied /api/* at the apex. That proxy
+    // was deliberately removed (see infrastructure/frontend-infra.yml); today
+    // that path just serves the SPA's index.html. The apex now proxies this
+    // one specific path instead (frontend-infra.yml's `/public/*` cache
+    // behavior, same mechanism as the `/config` passthrough) -- deliberately
+    // the apex, not the API's own subdomain, since Universal Links need a
+    // domain we host the apple-app-site-association file on.
+    const publicUrlFor = (token: string) => `${siteOrigin}/public/${token}`;
 
     // Reuse an existing token if the file is already public.
     const existing = (

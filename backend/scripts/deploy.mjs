@@ -217,6 +217,35 @@ async function main() {
   console.log(`    UserPoolClientId       = ${outputs.UserPoolClientId}`);
   console.log(`    UserPoolClientMobileId = ${outputs.UserPoolClientMobileId}`);
 
+  // ---------- 3.5. Patch getConfig's API_BASE_URL ----------
+  // Can't be set in template.yaml itself: `${HttpApi}` isn't known until the
+  // API's routes (including getConfig's own) already exist, so referencing
+  // it from getConfig's Environment is a real CFN circular dependency
+  // (HttpApi's routes need getConfig's ARN; getConfig would need HttpApi's
+  // id) -- same class of problem as the Cognito LambdaConfig wiring above.
+  // Patched here instead, now that it's a known stack output. get + merge +
+  // put because `update-function-configuration --environment` REPLACES the
+  // whole map -- a bare `Variables={API_BASE_URL:...}` would wipe every var
+  // CFN set (APP_DISPLAY_NAME, COGNITO_DOMAIN, ...).
+  log("Setting getConfig's API_BASE_URL (can't be set via CFN -- see template.yaml)");
+  const apiBaseUrl = outputs.ApiCustomDomainUrl || outputs.ApiEndpoint;
+  const getConfigFnName = `${cfg.functionNamePrefix}-getConfig`;
+  const currentEnv = JSON.parse(
+    runCapture("aws", [
+      "lambda", "get-function-configuration",
+      "--function-name", getConfigFnName,
+      "--region", region,
+      "--query", "Environment.Variables",
+      "--output", "json",
+    ]),
+  );
+  run("aws", [
+    "lambda", "update-function-configuration",
+    "--function-name", getConfigFnName,
+    "--region", region,
+    "--environment", JSON.stringify({ Variables: { ...currentEnv, API_BASE_URL: apiBaseUrl } }),
+  ]);
+
   // ---------- 4. Frontend build + deploy (optional) ----------
   if (cfg.frontend) {
     log(`Building frontend against the deployed stack`);
@@ -253,6 +282,19 @@ async function main() {
 
     log(`Syncing dist/ to ${uploadPath}`);
     run("aws", ["s3", "sync", "dist/", uploadPath, "--delete"], { cwd: frontendDir });
+
+    // aws s3 sync guesses Content-Type from the file extension -- this one
+    // file (frontend/public/.well-known/apple-app-site-association) has none
+    // on purpose (that's the fixed path Apple's Universal Links verifier
+    // fetches), so it lands as application/octet-stream unless corrected here.
+    const aasaPath = resolve(frontendDir, "public/.well-known/apple-app-site-association");
+    if (existsSync(aasaPath)) {
+      log("Fixing Content-Type on the Universal Links verification file");
+      run("aws", [
+        "s3", "cp", aasaPath, `${uploadPath}.well-known/apple-app-site-association`,
+        "--content-type", "application/json",
+      ]);
+    }
 
     log(`Invalidating CloudFront distribution ${distributionId}`);
     run("aws", ["cloudfront", "create-invalidation", "--distribution-id", distributionId, "--paths", "/*"]);

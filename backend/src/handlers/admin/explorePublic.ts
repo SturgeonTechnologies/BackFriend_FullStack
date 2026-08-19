@@ -38,7 +38,8 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     }
 
     const siteOrigin = process.env.SITE_ORIGIN ?? "";
-    const publicUrlFor = (t: string) => `${siteOrigin}/api/public/${t}`;
+    // NOT /api/public/... -- see setPublic.ts's publicUrlFor comment; same fix.
+    const publicUrlFor = (t: string) => `${siteOrigin}/public/${t}`;
 
     const existing = (
       await ddb.send(new GetCommand({ TableName: PUBLIC_SHARES_TABLE, Key }))
