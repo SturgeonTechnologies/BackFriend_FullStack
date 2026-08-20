@@ -287,6 +287,29 @@ export function deleteFile(idToken: string, mountPath: string, path: string) {
   );
 }
 
+// ----- Personal archive (self-service, no mount -- Share Extension target on
+// mobile, but readable from anywhere since it's just user_sharing_default/<email>/
+// under the shares bucket like anything else) -----
+export interface ArchiveFile { name: string; key: string; size: number; lastModified?: string; }
+export function listArchive(idToken: string) {
+  return request<{ files: ArchiveFile[] }>("/archive/list", { idToken });
+}
+export function getArchiveDownloadUrl(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ downloadUrl: string; expiresInSeconds: number }>(
+    `/archive/download-url?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+/** Publish an archived item and get back a shareable link (same token mechanism as setFilePublic below). */
+export function setArchivePublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ token: string; publicUrl: string }>(
+    `/archive/public?${qs}`,
+    { method: "POST", idToken },
+  );
+}
+
 // ----- Public file sharing (admin) -----
 /** Make a file publicly downloadable; returns the stable shareable URL. */
 export function setFilePublic(idToken: string, mountPath: string, path: string) {

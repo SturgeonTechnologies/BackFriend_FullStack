@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { listMounts, searchFiles, getDownloadUrl, Mount, SearchResult } from "../lib/api";
+import {
+  listMounts, searchFiles, getDownloadUrl, Mount, SearchResult,
+  listArchive, getArchiveDownloadUrl, setArchivePublic, ArchiveFile,
+} from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
@@ -19,6 +22,7 @@ export default function Home() {
   const [mounts, setMounts] = useState<Mount[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [archiveFiles, setArchiveFiles] = useState<ArchiveFile[]>([]);
 
   // Global search.
   const [q, setQ] = useState("");
@@ -34,6 +38,12 @@ export default function Home() {
       .then((r) => setMounts(r.mounts))
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
+    // Best-effort, separate from the main mounts load/error state -- this is
+    // a nice-to-have shortcut to whatever's been shared into the app from
+    // elsewhere (e.g. the mobile app's Share Extension), not core to the page.
+    listArchive(idToken)
+      .then((r) => setArchiveFiles(r.files))
+      .catch(() => setArchiveFiles([]));
   }, [idToken]);
 
   const runSearch = async (e: React.FormEvent) => {
@@ -56,6 +66,23 @@ export default function Home() {
       const { downloadUrl } = await getDownloadUrl(idToken, mountPath, path);
       window.location.assign(downloadUrl);
     } catch (e: any) { alert(e.message ?? "Download failed"); }
+  };
+
+  const downloadArchived = async (key: string) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, key);
+      window.location.assign(downloadUrl);
+    } catch (e: any) { alert(e.message ?? "Download failed"); }
+  };
+
+  const shareArchived = async (key: string) => {
+    if (!idToken) return;
+    try {
+      const { publicUrl } = await setArchivePublic(idToken, key);
+      await navigator.clipboard.writeText(publicUrl);
+      alert(`Link copied:\n${publicUrl}`);
+    } catch (e: any) { alert(e.message ?? "Couldn't create a share link"); }
   };
 
   const play = async (f: SearchResult, kind: "video" | "audio") => {
@@ -142,6 +169,32 @@ export default function Home() {
             </>
           )}
         </div>
+      )}
+
+      {archiveFiles.length > 0 && (
+        <>
+          <h2 style={{ marginTop: "1.5rem" }}>Recently shared</h2>
+          <p className="muted">Things you've shared into the app from elsewhere (e.g. the mobile app).</p>
+          <table>
+            <thead><tr>
+              <th>Name</th><th style={{ width: 110 }}>Size</th><th style={{ width: 160 }}></th>
+            </tr></thead>
+            <tbody>
+              {archiveFiles.map((f) => (
+                <tr key={f.key}>
+                  <td>{f.name}</td>
+                  <td>{fmtBytes(f.size)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button type="button" onClick={() => shareArchived(f.key)} style={{ marginRight: 8 }}>
+                      Get link
+                    </button>
+                    <button onClick={() => downloadArchived(f.key)}>Download</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
 
       <h2 style={{ marginTop: "1.5rem" }}>Shared directories</h2>
