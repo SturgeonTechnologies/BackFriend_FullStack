@@ -138,6 +138,13 @@ Resources:
                   - cloudformation:ValidateTemplate
                   - cloudformation:ListStacks
                 Resource: "*"
+              # SAM templates (Transform: AWS::Serverless-2016-10-31) need this
+              # separately -- creating a changeset that invokes the transform
+              # macro requires permission on the macro's own ARN, distinct from
+              # (and in addition to) permission on the target stack.
+              - Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: "arn:aws:cloudformation:us-east-1:aws:transform/Serverless-2016-10-31"
 
               # --- Lambda: this service's functions (+ a couple of read-only account calls) ---
               - Effect: Allow
