@@ -87,6 +87,15 @@ nav .nav-icon:hover { color: var(--accent); text-decoration: none; }
 
 main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
 
+/* Drop-zone pages (Home/Browse/Archive) need to cover the full available
+   height, not just their content's height -- otherwise dropping a file into
+   empty space below a short file list falls through to the window-level
+   dragover/drop safety net in App.tsx (which only exists to stop a stray
+   drop from navigating the browser away) instead of the page's own upload
+   handler: the cursor still shows a valid "copy" indicator since that
+   handler calls preventDefault(), but nothing actually uploads. */
+.drop-zone-page { min-height: calc(100vh - 140px); }
+
 /* Allowed-emails autocomplete dropdown. */
 .autocomplete-panel {
   position: absolute;

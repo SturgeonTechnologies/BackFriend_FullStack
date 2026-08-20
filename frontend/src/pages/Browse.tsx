@@ -272,7 +272,7 @@ export default function Browse() {
   };
 
   return (
-    <div {...dropProps}>
+    <div className="drop-zone-page" {...dropProps}>
       {isDragging && (
         <div className="drop-overlay">
           <div className="drop-overlay-text">Drop to upload to {displayName}{subpath ? `/${subpath}` : ""}</div>

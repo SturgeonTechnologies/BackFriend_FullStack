@@ -152,7 +152,7 @@ export default function Home() {
   const { isDragging, dropProps } = useDropUpload(uploadToArchive);
 
   return (
-    <div {...dropProps}>
+    <div className="drop-zone-page" {...dropProps}>
       {isDragging && (
         <div className="drop-overlay">
           <div className="drop-overlay-text">Drop to upload to your personal folder</div>
