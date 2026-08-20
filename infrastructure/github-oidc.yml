@@ -38,6 +38,16 @@ Parameters:
   SharesBucket:
     Type: String
     Default: schuit-sharing
+  ArtifactBucket:
+    Type: String
+    Default: schuit-sharing-artifacts-587449585882
+    Description: >
+      SAM's --s3-bucket target (deploy.config.<name>.json's artifactBucket).
+      Separate from SharesBucket on purpose -- this permission set predates
+      the SAM migration and was still scoped to the old Serverless
+      Framework's *-serverlessdeploymentbucket-* convention, which SAM never
+      uses (discovered when CI's first real post-migration deploy failed
+      with AccessDenied on PutObject).
   DistributionId:
     Type: String
     Default: E26FQPCAP5752P
@@ -196,6 +206,18 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::${ResourcePrefix}-${Stage}-serverlessdeploymentbucket-*"
                   - !Sub "arn:aws:s3:::${ResourcePrefix}-${Stage}-serverlessdeploymentbucket-*/*"
+
+              # --- S3: SAM's artifact bucket (sam deploy --s3-bucket target) ---
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub "arn:aws:s3:::${ArtifactBucket}"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${ArtifactBucket}/*"
 
               # --- S3: SPA sync target — only the web/ prefix of the shares bucket ---
               - Effect: Allow
