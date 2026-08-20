@@ -28,8 +28,10 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     // headroom to actually watch/scrub something without the link expiring
     // mid-playback.
     const expiresInSeconds = 3600;
-    const url = await presignGet(bucket, key, expiresInSeconds);
-    return ok({ downloadUrl: url, expiresInSeconds, filename: key.split("/").pop() });
+    const filename = key.split("/").pop();
+    const forceDownload = event.queryStringParameters?.download === "1";
+    const url = await presignGet(bucket, key, expiresInSeconds, forceDownload ? filename : undefined);
+    return ok({ downloadUrl: url, expiresInSeconds, filename });
   } catch (e: any) {
     if (e.statusCode) return error(e.statusCode, e.message);
     console.error(e);

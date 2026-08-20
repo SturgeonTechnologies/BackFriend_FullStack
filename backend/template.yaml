@@ -987,6 +987,54 @@ Resources:
         EntryPoints:
           - src/handlers/user/browseList.ts
 
+  MountAccessGet:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-mountAccessGet"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: getMountAccess.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /browse/{mountPath}/access
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/getMountAccess.ts
+
+  MountAccessUpdate:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-mountAccessUpdate"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: updateMountAccess.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: PUT
+            Path: /browse/{mountPath}/access
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/updateMountAccess.ts
+
   BrowseDownloadUrl:
     Type: AWS::Serverless::Function
     Properties:

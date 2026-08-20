@@ -103,7 +103,7 @@ export default function Archive() {
   const download = async (key: string) => {
     if (!idToken) return;
     try {
-      const { downloadUrl } = await getArchiveDownloadUrl(idToken, key);
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, key, true);
       window.location.assign(downloadUrl);
     } catch (e: any) { alert(e.message ?? "Download failed"); }
   };

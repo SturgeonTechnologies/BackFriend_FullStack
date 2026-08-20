@@ -89,14 +89,28 @@ export async function putFolderMarker(bucket: string, key: string): Promise<void
   await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: "" }));
 }
 
+/**
+ * `downloadFilename`, when set, signs a `Content-Disposition: attachment`
+ * response header so the browser saves the file instead of opening it
+ * inline (images/videos/PDFs otherwise just navigate/display in-tab). Leave
+ * unset for URLs that feed inline preview -- thumbnails, MediaPlayer,
+ * ImageViewer -- which need the file to actually render in the page.
+ */
 export async function presignGet(
   bucket: string,
   key: string,
   expiresInSeconds = 300,
+  downloadFilename?: string,
 ): Promise<string> {
   return getSignedUrl(
     s3,
-    new GetObjectCommand({ Bucket: bucket, Key: key }),
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ...(downloadFilename
+        ? { ResponseContentDisposition: `attachment; filename="${downloadFilename.replace(/["\r\n]/g, "")}"` }
+        : {}),
+    }),
     { expiresIn: expiresInSeconds },
   );
 }

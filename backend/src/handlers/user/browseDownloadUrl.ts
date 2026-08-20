@@ -36,7 +36,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     // mid-playback.
     const expiresInSeconds = 3600;
     const key = mount.prefix + rel;
-    const url = await presignGet(mount.bucket, key, expiresInSeconds);
+    const filename = rel.split("/").pop();
+    const forceDownload = event.queryStringParameters?.download === "1";
+    const url = await presignGet(mount.bucket, key, expiresInSeconds, forceDownload ? filename : undefined);
 
     console.log(JSON.stringify({
       evt: "download",
@@ -48,7 +50,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     return ok({
       downloadUrl: url,
       expiresInSeconds,
-      filename: rel.split("/").pop(),
+      filename,
     });
   } catch (e) {
     console.error(e);

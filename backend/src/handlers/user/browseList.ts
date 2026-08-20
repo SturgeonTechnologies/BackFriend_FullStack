@@ -3,7 +3,7 @@ import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { getCaller } from "../../lib/auth";
 import { ddb, PUBLIC_SHARES_TABLE } from "../../lib/db";
 import { ok, error } from "../../lib/response";
-import { canSeeMount, getMount, normalizeMountPath, safeSubpath } from "../../lib/mounts";
+import { canSeeMount, getMount, isMountAdmin, normalizeMountPath, safeSubpath } from "../../lib/mounts";
 import { listDir } from "../../lib/s3";
 
 /**
@@ -65,6 +65,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       mount: {
         mountPath: mount.mountPath,
         displayName: mount.displayName,
+        canManageAccess: isMountAdmin(caller, mount),
       },
       path: sub,
       folders: res.folders.map((k) => ({

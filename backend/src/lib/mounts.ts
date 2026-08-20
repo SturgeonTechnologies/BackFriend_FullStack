@@ -59,16 +59,34 @@ export async function getMount(mountPath: string): Promise<MountRow | null> {
  *
  * Rules:
  *   - Admins always see everything.
+ *   - This mount's own mountAdmins always see it too (they need to browse it
+ *     to manage access, and being trusted to grant others viewer access
+ *     implies having viewer access themselves).
  *   - If the mount has no `allowedEmails` (undefined or empty), it is
- *     restricted to admins only.
+ *     otherwise restricted to admins/mountAdmins only.
  *   - Otherwise, only callers whose email (lowercased) appears in the list
  *     are allowed.
  */
 export function canSeeMount(caller: CallerIdentity, mount: MountRow): boolean {
   if (caller.isAdmin) return true;
-  if (!mount.allowedEmails || mount.allowedEmails.length === 0) return false;
   if (!caller.email) return false;
-  return mount.allowedEmails.includes(caller.email.toLowerCase());
+  const email = caller.email.toLowerCase();
+  if (mount.mountAdmins?.includes(email)) return true;
+  if (!mount.allowedEmails || mount.allowedEmails.length === 0) return false;
+  return mount.allowedEmails.includes(email);
+}
+
+/**
+ * Returns true if the caller can manage THIS mount's allowedEmails (add/
+ * revoke viewer access) via PUT /browse/{mountPath}/access -- site admins,
+ * or an email in the mount's own mountAdmins list. Deliberately narrower
+ * than isAdmin: a mount-admin can't create/delete mounts, edit mountAdmins,
+ * or touch any other mount.
+ */
+export function isMountAdmin(caller: CallerIdentity, mount: MountRow): boolean {
+  if (caller.isAdmin) return true;
+  if (!caller.email) return false;
+  return !!mount.mountAdmins?.includes(caller.email.toLowerCase());
 }
 
 /**

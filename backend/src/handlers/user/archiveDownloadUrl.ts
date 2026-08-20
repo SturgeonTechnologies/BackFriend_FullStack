@@ -27,9 +27,13 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     }
 
     const expiresInSeconds = 3600;
-    const downloadUrl = await presignGet(process.env.SHARES_BUCKET!, key, expiresInSeconds);
+    const filename = key.split("/").pop();
+    const forceDownload = event.queryStringParameters?.download === "1";
+    const downloadUrl = await presignGet(
+      process.env.SHARES_BUCKET!, key, expiresInSeconds, forceDownload ? filename : undefined,
+    );
 
-    return ok({ downloadUrl, expiresInSeconds });
+    return ok({ downloadUrl, expiresInSeconds, filename });
   } catch (e) {
     console.error(e);
     return error(500, "Internal error");

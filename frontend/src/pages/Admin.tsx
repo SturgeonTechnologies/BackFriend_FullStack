@@ -11,6 +11,7 @@ import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { EmailChips } from "../components/EmailChips";
 import { categoryFor } from "../lib/fileTypes";
 
 export default function Admin() {
@@ -252,7 +253,7 @@ function ExplorerFileActions({
 
   const download = async () => {
     if (!idToken) return;
-    try { const { downloadUrl } = await exploreDownloadUrl(idToken, file.path); window.location.assign(downloadUrl); }
+    try { const { downloadUrl } = await exploreDownloadUrl(idToken, file.path, true); window.location.assign(downloadUrl); }
     catch (e: any) { alert(e.message ?? "Download failed"); }
   };
 
@@ -284,77 +285,6 @@ function ExplorerFileActions({
   );
 }
 
-// Allowed-emails editor: an input with autocomplete (from active users +
-// pending invites) plus an "Add" button; added emails render as chips with a
-// trash icon to remove. Value is the list of emails.
-const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-
-function EmailChips({
-  emails, onChange, knownEmails,
-}: {
-  emails: string[];
-  onChange: (next: string[]) => void;
-  knownEmails: string[];
-}) {
-  const [draft, setDraft] = useState("");
-  const [focused, setFocused] = useState(false);
-
-  const add = (raw: string) => {
-    const e = raw.trim().toLowerCase();
-    if (!e || !isEmail(e) || emails.includes(e)) return;
-    onChange([...emails, e]);
-    setDraft("");
-  };
-  const remove = (e: string) => onChange(emails.filter((x) => x !== e));
-  const suggestions = (): string[] => {
-    const d = draft.trim().toLowerCase();
-    return knownEmails.filter((e) => !emails.includes(e) && (d === "" || e.includes(d))).slice(0, 8);
-  };
-
-  return (
-    <div>
-      <div style={{ position: "relative" }}>
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } }}
-          placeholder="type or pick an email to add"
-          autoComplete="off"
-        />
-        {focused && suggestions().length > 0 && (
-          <div className="autocomplete-panel">
-            {suggestions().map((e) => (
-              <div key={e} className="autocomplete-item" onMouseDown={(ev) => { ev.preventDefault(); add(e); }}>
-                {e}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      {emails.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-          {emails.map((e) => (
-            <span key={e} className="email-chip">
-              {e}
-              <button
-                type="button"
-                className="email-chip-remove"
-                onClick={() => remove(e)}
-                title={`Remove ${e}`}
-                aria-label={`Remove ${e}`}
-              >
-                <TrashIcon />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MountsCard() {
   const { idToken } = useAuth();
   const [mounts, setMounts] = useState<Mount[]>([]);
@@ -364,6 +294,7 @@ function MountsCard() {
   const [bucket, setBucket] = useState("");
   const [description, setDescription] = useState("");
   const [allowedEmailsList, setAllowedEmailsList] = useState<string[]>([]);
+  const [mountAdminsList, setMountAdminsList] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -400,6 +331,7 @@ function MountsCard() {
   // "Manage access" editor for an existing mount.
   const [editMount, setEditMount] = useState<Mount | null>(null);
   const [editEmailsList, setEditEmailsList] = useState<string[]>([]);
+  const [editMountAdminsList, setEditMountAdminsList] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   const refresh = async () => {
@@ -486,6 +418,7 @@ function MountsCard() {
     setDisplayName(existing ? existing.displayName : humanizeName(leaf));
     setDescription(existing?.description ?? "");
     setAllowedEmailsList(existing?.allowedEmails ?? []);
+    setMountAdminsList(existing?.mountAdmins ?? []);
     setBucket("");
     setErr(null);
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -501,6 +434,7 @@ function MountsCard() {
   const openEditAccess = (m: Mount) => {
     setEditMount(m);
     setEditEmailsList(m.allowedEmails ?? []);
+    setEditMountAdminsList(m.mountAdmins ?? []);
     setErr(null);
   };
   const handleSaveAccess = async (e: React.FormEvent) => {
@@ -508,7 +442,10 @@ function MountsCard() {
     if (!idToken || !editMount) return;
     setSavingEdit(true); setErr(null); setNotice(null);
     try {
-      const res = await updateMount(idToken, editMount.mountPath, { allowedEmails: editEmailsList });
+      const res = await updateMount(idToken, editMount.mountPath, {
+        allowedEmails: editEmailsList,
+        mountAdmins: editMountAdminsList,
+      });
       noteAutoInvited(res.autoInvited);
       setEditMount(null);
       await refresh();
@@ -527,6 +464,7 @@ function MountsCard() {
       const res = existing
         ? await updateMount(idToken, existing.mountPath, {
             allowedEmails: allowedEmailsList,
+            mountAdmins: mountAdminsList,
             displayName: displayName.trim(),
             description: description.trim(),
           })
@@ -537,6 +475,7 @@ function MountsCard() {
             description: description.trim() || undefined,
             bucket: bucket.trim() || undefined,
             allowedEmails: allowedEmailsList.length ? allowedEmailsList : undefined,
+            mountAdmins: mountAdminsList.length ? mountAdminsList : undefined,
           });
       noteAutoInvited(res.autoInvited);
       await refresh();
@@ -814,6 +753,15 @@ function MountsCard() {
             </label>
             <EmailChips emails={allowedEmailsList} onChange={setAllowedEmailsList} knownEmails={knownEmails} />
           </div>
+          <div style={{ marginTop: "0.75rem" }}>
+            <label>
+              Mount admins
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                — can add/revoke allowed emails for this mount from its Browse page, without being full site admins.
+              </span>
+            </label>
+            <EmailChips emails={mountAdminsList} onChange={setMountAdminsList} knownEmails={knownEmails} />
+          </div>
           <button disabled={busy} style={{ marginTop: "0.75rem" }}>
             {busy
               ? "Saving…"
@@ -878,6 +826,13 @@ function MountsCard() {
               </span>
             </label>
             <EmailChips emails={editEmailsList} onChange={setEditEmailsList} knownEmails={knownEmails} />
+            <label style={{ marginTop: "0.75rem" }}>
+              Mount admins
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                — can add/revoke allowed emails for this mount from its Browse page.
+              </span>
+            </label>
+            <EmailChips emails={editMountAdminsList} onChange={setEditMountAdminsList} knownEmails={knownEmails} />
             {err && <p className="err">{err}</p>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
               <button type="button" className="secondary" onClick={() => setEditMount(null)}>Cancel</button>

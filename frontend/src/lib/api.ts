@@ -92,6 +92,12 @@ export interface Mount {
    * can see it.
    */
   allowedEmails?: string[];
+  /**
+   * Only populated for admins. Emails who can manage this mount's own
+   * allowedEmails (add/revoke viewer access) without being full site admins
+   * — see updateMountAccess.
+   */
+  mountAdmins?: string[];
   /** S3 prefix — admin-only; used to match a mount to an explorer directory. */
   prefix?: string;
 }
@@ -108,6 +114,8 @@ export function createMount(
     bucket?: string;
     /** Optional access control. Empty/omitted = admins-only. */
     allowedEmails?: string[];
+    /** Optional: emails who can manage allowedEmails without being site admins. */
+    mountAdmins?: string[];
   },
 ) {
   return request<MountWrite>("/admin/mounts", {
@@ -126,13 +134,32 @@ export function deleteMount(idToken: string, mountPath: string) {
 export function updateMount(
   idToken: string,
   mountPath: string,
-  body: { allowedEmails?: string[] | null; displayName?: string; description?: string },
+  body: {
+    allowedEmails?: string[] | null;
+    mountAdmins?: string[] | null;
+    displayName?: string;
+    description?: string;
+  },
 ) {
   return request<MountWrite>(`/admin/mounts/${encodeURIComponent(mountPath)}`, {
     method: "PUT",
     idToken,
     body: JSON.stringify(body),
   });
+}
+
+// ----- Mount access (mount admins -- site admins, or a mount's own mountAdmins) -----
+export function getMountAccess(idToken: string, mountPath: string) {
+  return request<{ allowedEmails: string[]; mountAdmins: string[] }>(
+    `/browse/${encodeURIComponent(mountPath)}/access`,
+    { idToken },
+  );
+}
+export function updateMountAccess(idToken: string, mountPath: string, allowedEmails: string[] | null) {
+  return request<{ allowedEmails: string[]; autoInvited: string[] }>(
+    `/browse/${encodeURIComponent(mountPath)}/access`,
+    { method: "PUT", idToken, body: JSON.stringify({ allowedEmails }) },
+  );
 }
 
 // ----- Bucket explorer (admin) -----
@@ -178,8 +205,9 @@ export function deleteDirectory(idToken: string, prefix: string) {
     `/admin/explore/directory?${qs}`, { method: "DELETE", idToken });
 }
 /** Explorer file actions, addressed by full S3 key (admin-only). */
-export function exploreDownloadUrl(idToken: string, key: string) {
+export function exploreDownloadUrl(idToken: string, key: string, forceDownload = false) {
   const qs = new URLSearchParams({ key });
+  if (forceDownload) qs.set("download", "1");
   return request<{ downloadUrl: string; filename: string }>(
     `/admin/explore/download-url?${qs}`, { idToken });
 }
@@ -252,7 +280,7 @@ export function browseList(
   if (token) qs.set("token", token);
   const suffix = qs.toString() ? `?${qs}` : "";
   return request<{
-    mount: { mountPath: string; displayName: string };
+    mount: { mountPath: string; displayName: string; canManageAccess: boolean };
     path: string;
     folders: BrowseFolder[];
     files: BrowseFile[];
@@ -261,8 +289,12 @@ export function browseList(
   }>(`/browse/${encodeURIComponent(mountPath)}${suffix}`, { idToken });
 }
 
-export function getDownloadUrl(idToken: string, mountPath: string, path: string) {
+/** `forceDownload` signs a Content-Disposition: attachment header so the
+ *  browser saves the file instead of opening it inline -- use it for the
+ *  explicit Download action; leave it off for thumbnail/preview loading. */
+export function getDownloadUrl(idToken: string, mountPath: string, path: string, forceDownload = false) {
   const qs = new URLSearchParams({ path });
+  if (forceDownload) qs.set("download", "1");
   return request<{ downloadUrl: string; expiresInSeconds: number; filename: string }>(
     `/browse/${encodeURIComponent(mountPath)}/download-url?${qs}`,
     { idToken },
@@ -309,9 +341,10 @@ export function getArchiveUploadUrl(idToken: string, filename: string) {
     { method: "POST", idToken },
   );
 }
-export function getArchiveDownloadUrl(idToken: string, key: string) {
+export function getArchiveDownloadUrl(idToken: string, key: string, forceDownload = false) {
   const qs = new URLSearchParams({ key });
-  return request<{ downloadUrl: string; expiresInSeconds: number }>(
+  if (forceDownload) qs.set("download", "1");
+  return request<{ downloadUrl: string; expiresInSeconds: number; filename: string }>(
     `/archive/download-url?${qs}`,
     { method: "POST", idToken },
   );

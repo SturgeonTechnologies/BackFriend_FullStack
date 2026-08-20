@@ -24,6 +24,9 @@ interface Body {
    * mount is visible to every authenticated user. Admins always see it.
    */
   allowedEmails?: string[];
+  /** Optional list of emails who can manage this mount's own allowedEmails
+   *  (see lib/mounts.ts isMountAdmin) without being full site admins. */
+  mountAdmins?: string[];
 }
 
 export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
@@ -49,6 +52,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       );
     }
     const allowedEmails = normalizeAllowedEmails(body.allowedEmails);
+    const mountAdmins = normalizeAllowedEmails(body.mountAdmins);
 
     const item: Record<string, unknown> = {
       mountPath,
@@ -60,6 +64,7 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
       createdAt: new Date().toISOString(),
     };
     if (allowedEmails) item.allowedEmails = allowedEmails;
+    if (mountAdmins) item.mountAdmins = mountAdmins;
 
     await ddb.send(
       new PutCommand({
@@ -71,8 +76,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
 
     // Auto-invite anyone granted access who isn't invited/joined yet, so the
     // access grant works even before they've accepted an invitation.
-    const autoInvited = allowedEmails
-      ? await ensureInvitesFor(allowedEmails, caller.email ?? caller.sub)
+    const grantedEmails = [...new Set([...(allowedEmails ?? []), ...(mountAdmins ?? [])])];
+    const autoInvited = grantedEmails.length
+      ? await ensureInvitesFor(grantedEmails, caller.email ?? caller.sub)
       : [];
 
     return created({ ...item, autoInvited });

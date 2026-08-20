@@ -39,6 +39,15 @@ export interface MountRow {
    * (plus admins, who always see everything) can see / browse it.
    */
   allowedEmails?: string[];
+  /**
+   * Optional list of emails who can manage this mount's own allowedEmails
+   * (add/revoke viewer access) via PUT /browse/{mountPath}/access, without
+   * being full site admins. Settable only by site admins (via
+   * admin/createMount.ts / admin/updateMount.ts) -- a mount-admin can't grant
+   * mount-admin rights to anyone else. Site admins are implicitly mount-admins
+   * of every mount regardless of this list -- see lib/mounts.ts isMountAdmin.
+   */
+  mountAdmins?: string[];
   createdBy: string;
   createdAt: string;
 }

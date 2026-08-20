@@ -10,6 +10,11 @@ interface Body {
   /** Replace the allowed-emails list. Empty/omitted-with-key removes it (mount
    *  becomes admins-only). Leave the key out entirely to not touch it. */
   allowedEmails?: string[] | null;
+  /** Replace the mount-admins list (see lib/mounts.ts isMountAdmin). Same
+   *  empty/omitted-with-key-removes semantics as allowedEmails. Site-admin
+   *  only (this whole handler is requireAdmin-gated) -- a mount-admin can't
+   *  reach this endpoint to grant themselves or anyone else more mounts. */
+  mountAdmins?: string[] | null;
   displayName?: string;
   description?: string;
 }
@@ -41,13 +46,25 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     if ("allowedEmails" in body) {
       const cleaned = normalizeAllowedEmails(body.allowedEmails);
       if (cleaned) {
-        grantedEmails = cleaned;
+        grantedEmails.push(...cleaned);
         sets.push("#ae = :ae");
         names["#ae"] = "allowedEmails";
         values[":ae"] = cleaned;
       } else {
         removes.push("#ae");
         names["#ae"] = "allowedEmails";
+      }
+    }
+    if ("mountAdmins" in body) {
+      const cleaned = normalizeAllowedEmails(body.mountAdmins);
+      if (cleaned) {
+        grantedEmails.push(...cleaned);
+        sets.push("#ma = :ma");
+        names["#ma"] = "mountAdmins";
+        values[":ma"] = cleaned;
+      } else {
+        removes.push("#ma");
+        names["#ma"] = "mountAdmins";
       }
     }
     if (typeof body.displayName === "string" && body.displayName.trim()) {
@@ -79,8 +96,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     );
 
     // Auto-invite anyone newly granted access who isn't invited/joined yet.
-    const autoInvited = grantedEmails.length
-      ? await ensureInvitesFor(grantedEmails, caller.email ?? caller.sub)
+    const uniqueGranted = [...new Set(grantedEmails)];
+    const autoInvited = uniqueGranted.length
+      ? await ensureInvitesFor(uniqueGranted, caller.email ?? caller.sub)
       : [];
 
     return ok({ ...res.Attributes, autoInvited });

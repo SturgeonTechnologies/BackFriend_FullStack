@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   browseList, getDownloadUrl, setFilePublic, unsetFilePublic,
-  getUploadUrl, deleteFile,
+  getUploadUrl, deleteFile, getMountAccess, updateMountAccess,
   BrowseFile, BrowseFolder,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -11,6 +11,7 @@ import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { EmailChips } from "../components/EmailChips";
 import { categoryFor } from "../lib/fileTypes";
 import { useDropUpload } from "../lib/useDropUpload";
 
@@ -65,6 +66,80 @@ function PublicCell({ mountPath, file }: { mountPath: string; file: BrowseFile }
   );
 }
 
+/** Self-service allowed-emails editor for a mount's own admins (site admins,
+ * or emails in the mount's mountAdmins list) -- lets them add/revoke viewer
+ * access to this one directory without needing the full /admin page. */
+function ManageAccessModal({ mountPath, displayName, onClose }: { mountPath: string; displayName: string; onClose: () => void }) {
+  const { idToken } = useAuth();
+  const [emails, setEmails] = useState<string[]>([]);
+  const [mountAdmins, setMountAdmins] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!idToken) return;
+    getMountAccess(idToken, mountPath)
+      .then((r) => { setEmails(r.allowedEmails); setMountAdmins(r.mountAdmins); })
+      .catch((e) => setErr(e.message))
+      .finally(() => setLoading(false));
+  }, [idToken, mountPath]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!idToken) return;
+    setSaving(true); setErr(null);
+    try {
+      await updateMountAccess(idToken, mountPath, emails.length ? emails : null);
+      onClose();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div
+      onMouseDown={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
+      }}
+    >
+      <form
+        onSubmit={save}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width: 460, maxWidth: "92vw", margin: 0 }}
+      >
+        <h3 style={{ marginTop: 0 }}>Manage access — {displayName}</h3>
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : (
+          <>
+            <label>
+              Allowed emails
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>
+                — leave empty to restrict to admins only.
+              </span>
+            </label>
+            <EmailChips emails={emails} onChange={setEmails} knownEmails={[]} />
+            {mountAdmins.length > 0 && (
+              <p className="muted" style={{ marginTop: "0.75rem", fontSize: 13 }}>
+                Mount admins (can also manage this list): {mountAdmins.join(", ")}
+              </p>
+            )}
+          </>
+        )}
+        {err && <p className="err">{err}</p>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: "0.75rem" }}>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={loading || saving}>{saving ? "Saving…" : "Save"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Breadcrumbs({ mountPath, displayName, path }: { mountPath: string; displayName: string; path: string }) {
   const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
   const crumbs: { label: string; to: string }[] = [{ label: displayName, to: `/browse/${encodeURIComponent(mountPath)}` }];
@@ -91,6 +166,8 @@ export default function Browse() {
   const subpath = search.get("path") ?? "";
   const { idToken, isAdmin } = useAuth();
   const [displayName, setDisplayName] = useState<string>(mountPath);
+  const [canManageAccess, setCanManageAccess] = useState(false);
+  const [showManageAccess, setShowManageAccess] = useState(false);
   const [folders, setFolders] = useState<BrowseFolder[]>([]);
   const [files, setFiles] = useState<BrowseFile[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -107,6 +184,7 @@ export default function Browse() {
     try {
       const r = await browseList(idToken, mountPath, subpath);
       setDisplayName(r.mount.displayName);
+      setCanManageAccess(r.mount.canManageAccess);
       setFolders(r.folders);
       setFiles(r.files);
     } catch (e: any) {
@@ -121,7 +199,7 @@ export default function Browse() {
   const download = async (filePath: string) => {
     if (!idToken) return;
     try {
-      const { downloadUrl } = await getDownloadUrl(idToken, mountPath, filePath);
+      const { downloadUrl } = await getDownloadUrl(idToken, mountPath, filePath, true);
       window.location.assign(downloadUrl);
     } catch (e: any) {
       alert(e.message ?? "Download failed");
@@ -211,7 +289,12 @@ export default function Browse() {
         style={{ display: "none" }}
         onChange={onFilesSelected}
       />
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: "0.5rem" }}>
+        {canManageAccess && (
+          <button type="button" className="secondary" onClick={() => setShowManageAccess(true)}>
+            Manage access
+          </button>
+        )}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -286,6 +369,9 @@ export default function Browse() {
       )}
       {viewingImage && (
         <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
+      )}
+      {showManageAccess && (
+        <ManageAccessModal mountPath={mountPath} displayName={displayName} onClose={() => setShowManageAccess(false)} />
       )}
     </div>
   );

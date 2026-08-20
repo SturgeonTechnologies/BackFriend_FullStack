@@ -69,7 +69,7 @@ export default function Home() {
   const download = async (mountPath: string, path: string) => {
     if (!idToken) return;
     try {
-      const { downloadUrl } = await getDownloadUrl(idToken, mountPath, path);
+      const { downloadUrl } = await getDownloadUrl(idToken, mountPath, path, true);
       window.location.assign(downloadUrl);
     } catch (e: any) { alert(e.message ?? "Download failed"); }
   };
@@ -77,7 +77,7 @@ export default function Home() {
   const downloadArchived = async (key: string) => {
     if (!idToken) return;
     try {
-      const { downloadUrl } = await getArchiveDownloadUrl(idToken, key);
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, key, true);
       window.location.assign(downloadUrl);
     } catch (e: any) { alert(e.message ?? "Download failed"); }
   };
