@@ -51,6 +51,16 @@ Parameters:
   DistributionId:
     Type: String
     Default: E26FQPCAP5752P
+  FrontendStackName:
+    Type: String
+    Default: schuit-sharing-frontend
+    Description: >
+      deploy.config.<name>.json's frontend.distributionStackName. A
+      separate CloudFormation stack (infrastructure/frontend-infra.yml),
+      unrelated to SamStackName -- deploy.mjs only ever reads its outputs
+      (S3 bucket, CloudFront distribution id), never creates/updates it
+      (that's the one-time manual infrastructure/deploy.sh step), so only
+      DescribeStacks is needed here.
   ResourcePrefix:
     Type: String
     Default: schuit-sharing
@@ -133,6 +143,9 @@ Resources:
                   - cloudformation:ListStackResources
                 Resource:
                   - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/${SamStackName}/*"
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/${FrontendStackName}/*"
               - Effect: Allow
                 Action:
                   - cloudformation:ValidateTemplate
