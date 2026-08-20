@@ -197,6 +197,36 @@ th { color: var(--muted); font-weight: 500; }
   pointer-events: none;
 }
 
+/* Folder/file list (Browse). Two-line row -- name + size on top, modified
+   date + actions hanging on the right below -- so nothing needs a table's
+   fixed columns or overflows horizontally on narrow/mobile screens. */
+.file-list { display: flex; flex-direction: column; }
+.folder-row, .file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.folder-row-name, .file-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.file-row-main { flex: 1; min-width: 0; }
+.file-row-top { display: flex; align-items: baseline; }
+.file-row-top .file-row-name { flex: 1; }
+.file-row-size { flex-shrink: 0; margin-left: 8px; font-size: 0.85rem; }
+.file-row-bottom {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+
 /* Drag-and-drop upload overlay (Home + Browse). */
 .drop-overlay {
   position: fixed;

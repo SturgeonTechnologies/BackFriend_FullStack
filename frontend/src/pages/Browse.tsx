@@ -199,88 +199,75 @@ export default function Browse() {
         style={{ display: "none" }}
         onChange={onFilesSelected}
       />
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th style={{ width: 120 }}>Size</th>
-            <th style={{ width: 180 }}>Modified</th>
-            <th style={{ width: isAdmin ? 320 : 200 }}>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                title="Add file(s)"
-                aria-label="Add file(s)"
-                style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
-              >
-                <UploadIcon />
-              </button>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {folders.map((f) => (
-            <tr key={`d-${f.path}`}>
-              <td>
-                📁 <Link to={`/browse/${encodeURIComponent(mountPath)}?path=${encodeURIComponent(f.path)}`}>
-                  {f.name}
-                </Link>
-              </td>
-              <td className="muted">—</td>
-              <td className="muted">—</td>
-              <td></td>
-            </tr>
-          ))}
-          {files.map((f) => {
-            const cat = categoryFor(f.name);
-            const playable = cat === "video" || cat === "audio";
-            return (
-            <tr key={`f-${f.path}`}>
-              <td>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <FileThumb
-                    category={cat}
-                    name={f.name}
-                    loadUrl={() => getDownloadUrl(idToken!, mountPath, f.path).then((r) => r.downloadUrl)}
-                    onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
-                  />
-                  <span>{f.name}</span>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          title="Add file(s)"
+          aria-label="Add file(s)"
+          style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+        >
+          <UploadIcon />
+        </button>
+      </div>
+      <div className="file-list">
+        {folders.map((f) => (
+          <div className="folder-row" key={`d-${f.path}`}>
+            <span>📁</span>
+            <Link className="folder-row-name" to={`/browse/${encodeURIComponent(mountPath)}?path=${encodeURIComponent(f.path)}`}>
+              {f.name}
+            </Link>
+          </div>
+        ))}
+        {files.map((f) => {
+          const cat = categoryFor(f.name);
+          const playable = cat === "video" || cat === "audio";
+          return (
+            <div className="file-row" key={`f-${f.path}`}>
+              <FileThumb
+                category={cat}
+                name={f.name}
+                loadUrl={() => getDownloadUrl(idToken!, mountPath, f.path).then((r) => r.downloadUrl)}
+                onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+              />
+              <div className="file-row-main">
+                <div className="file-row-top">
+                  <span className="file-row-name" title={f.name}>{f.name}</span>
+                  <span className="file-row-size muted">{fmtBytes(f.size)}</span>
                 </div>
-              </td>
-              <td>{fmtBytes(f.size)}</td>
-              <td className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</td>
-              <td style={{ whiteSpace: "nowrap" }}>
-                {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
-                <button
-                  type="button"
-                  onClick={() => download(f.path)}
-                  title="Download"
-                  aria-label={`Download ${f.name}`}
-                  style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                >
-                  <DownloadIcon />
-                </button>
-                {isAdmin && (
+                <div className="file-row-bottom">
+                  <span className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</span>
+                  {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
                   <button
                     type="button"
-                    className="danger"
-                    onClick={() => removeFile(f)}
-                    title="Delete file"
-                    aria-label={`Delete ${f.name}`}
-                    style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                    onClick={() => download(f.path)}
+                    title="Download"
+                    aria-label={`Download ${f.name}`}
+                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
                   >
-                    <TrashIcon />
+                    <DownloadIcon />
                   </button>
-                )}
-              </td>
-            </tr>
-            );
-          })}
-          {!loading && !folders.length && !files.length && (
-            <tr><td colSpan={4} className="muted" style={{ padding: "1rem" }}>Empty directory.</td></tr>
-          )}
-        </tbody>
-      </table>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => removeFile(f)}
+                      title="Delete file"
+                      aria-label={`Delete ${f.name}`}
+                      style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {!loading && !folders.length && !files.length && (
+          <p className="muted" style={{ padding: "1rem 0" }}>Empty directory.</p>
+        )}
+      </div>
       {playing && (
         <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
       )}
