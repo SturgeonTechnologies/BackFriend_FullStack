@@ -6,11 +6,12 @@ import {
   BrowseFile, BrowseFolder,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { TrashIcon } from "../lib/icons";
+import { DownloadIcon, TrashIcon, UploadIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { categoryFor } from "../lib/fileTypes";
+import { useDropUpload } from "../lib/useDropUpload";
 
 function fmtBytes(n: number) {
   if (!n) return "—";
@@ -135,11 +136,8 @@ export default function Browse() {
     }
   };
 
-  const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = e.target.files;
-    if (!picked || !picked.length || !idToken) return;
-    const list = Array.from(picked);
-    e.target.value = ""; // allow re-selecting the same file later
+  const uploadFiles = async (list: File[]) => {
+    if (!idToken || !list.length) return;
     let done = 0;
     setUploadMsg(`Uploading 0/${list.length}…`);
     try {
@@ -161,6 +159,17 @@ export default function Browse() {
     }
   };
 
+  const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files;
+    if (!picked || !picked.length) return;
+    const list = Array.from(picked);
+    e.target.value = ""; // allow re-selecting the same file later
+    await uploadFiles(list);
+  };
+
+  // Drop target is whatever directory (mount + subpath) is currently open.
+  const { isDragging, dropProps } = useDropUpload(uploadFiles);
+
   const removeFile = async (file: BrowseFile) => {
     if (!idToken) return;
     if (!confirm(`Permanently delete "${file.name}"? This deletes the file from S3 and cannot be undone.`)) return;
@@ -173,7 +182,12 @@ export default function Browse() {
   };
 
   return (
-    <div>
+    <div {...dropProps}>
+      {isDragging && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-text">Drop to upload to {displayName}{subpath ? `/${subpath}` : ""}</div>
+        </div>
+      )}
       <Breadcrumbs mountPath={mountPath} displayName={displayName} path={subpath} />
       {err && <p className="err">{err}</p>}
       {loading && <p className="muted">Loading…</p>}
@@ -195,9 +209,11 @@ export default function Browse() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                style={{ background: "var(--success)", color: "#0b1f13" }}
+                title="Add file(s)"
+                aria-label="Add file(s)"
+                style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
               >
-                Add file(s)
+                <UploadIcon />
               </button>
             </th>
           </tr>
@@ -235,12 +251,15 @@ export default function Browse() {
               <td className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
                 {isAdmin && <PublicCell mountPath={mountPath} file={f} />}
-                {playable && (
-                  <button type="button" onClick={() => play(f, cat as "video" | "audio")} style={{ marginRight: 8 }}>
-                    ▶ Play
-                  </button>
-                )}
-                <button onClick={() => download(f.path)}>Download</button>
+                <button
+                  type="button"
+                  onClick={() => download(f.path)}
+                  title="Download"
+                  aria-label={`Download ${f.name}`}
+                  style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                >
+                  <DownloadIcon />
+                </button>
                 {isAdmin && (
                   <button
                     type="button"

@@ -1088,6 +1088,30 @@ Resources:
         EntryPoints:
           - src/handlers/user/archivePublic.ts
 
+  ArchiveUnpublic:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archiveUnpublic"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archiveUnpublic.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /archive/public
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archiveUnpublic.ts
+
   ArchiveList:
     Type: AWS::Serverless::Function
     Properties:
@@ -1135,6 +1159,30 @@ Resources:
         Target: node20
         EntryPoints:
           - src/handlers/user/archiveDownloadUrl.ts
+
+  ArchiveDelete:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${FunctionNamePrefix}-archiveDelete"
+      CodeUri: .
+      Role: !GetAtt LambdaRole.Arn
+      Handler: archiveDelete.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: DELETE
+            Path: /archive/file
+            Auth: { Authorizer: CognitoJwt }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Sourcemap: true
+        Target: node20
+        EntryPoints:
+          - src/handlers/user/archiveDelete.ts
 
   DeleteFile:
     Type: AWS::Serverless::Function

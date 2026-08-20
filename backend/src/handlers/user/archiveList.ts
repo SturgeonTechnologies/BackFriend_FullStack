@@ -1,5 +1,7 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyHandlerV2WithJWTAuthorizer } from "aws-lambda";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { getCaller } from "../../lib/auth";
+import { ddb, PUBLIC_SHARES_TABLE, BUCKET_PUBLIC_PARTITION } from "../../lib/db";
 import { ok, error } from "../../lib/response";
 import { listDir } from "../../lib/s3";
 import { RESERVED_PERSONAL_PREFIX } from "../../lib/mounts";
@@ -25,13 +27,33 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (
     const token = event.queryStringParameters?.token;
     const res = await listDir(process.env.SHARES_BUCKET!, prefix, token);
 
+    // Public-share state, same BUCKET_PUBLIC_PARTITION convention
+    // archivePublic.ts writes to (keyed by the full S3 key, no mount).
+    const publicTokens = new Map<string, string>();
+    const shares = await ddb.send(
+      new QueryCommand({
+        TableName: PUBLIC_SHARES_TABLE,
+        KeyConditionExpression: "mountPath = :m",
+        ExpressionAttributeValues: { ":m": BUCKET_PUBLIC_PARTITION },
+      }),
+    );
+    for (const s of shares.Items ?? []) {
+      if (s.path && s.token) publicTokens.set(String(s.path), String(s.token));
+    }
+    const siteOrigin = process.env.SITE_ORIGIN ?? "";
+
     return ok({
-      files: res.files.map((f) => ({
-        name: f.key.slice(prefix.length),
-        key: f.key,
-        size: f.size,
-        lastModified: f.lastModified,
-      })),
+      files: res.files.map((f) => {
+        const shareToken = publicTokens.get(f.key);
+        return {
+          name: f.key.slice(prefix.length),
+          key: f.key,
+          size: f.size,
+          lastModified: f.lastModified,
+          public: !!shareToken,
+          publicUrl: shareToken ? `${siteOrigin}/public/${shareToken}` : undefined,
+        };
+      }),
       truncated: res.truncated,
       nextToken: res.nextContinuationToken,
     });

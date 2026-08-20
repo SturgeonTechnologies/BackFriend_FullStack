@@ -290,9 +290,24 @@ export function deleteFile(idToken: string, mountPath: string, path: string) {
 // ----- Personal archive (self-service, no mount -- Share Extension target on
 // mobile, but readable from anywhere since it's just user_sharing_default/<email>/
 // under the shares bucket like anything else) -----
-export interface ArchiveFile { name: string; key: string; size: number; lastModified?: string; }
-export function listArchive(idToken: string) {
-  return request<{ files: ArchiveFile[] }>("/archive/list", { idToken });
+export interface ArchiveFile {
+  name: string; key: string; size: number; lastModified?: string;
+  public?: boolean; publicUrl?: string;
+}
+export function listArchive(idToken: string, token?: string) {
+  const qs = token ? `?${new URLSearchParams({ token })}` : "";
+  return request<{ files: ArchiveFile[]; truncated: boolean; nextToken?: string }>(
+    `/archive/list${qs}`,
+    { idToken },
+  );
+}
+/** Get a presigned PUT URL to upload a file into the caller's own personal folder. */
+export function getArchiveUploadUrl(idToken: string, filename: string) {
+  const qs = new URLSearchParams({ filename });
+  return request<{ uploadUrl: string; key: string; expiresInSeconds: number }>(
+    `/archive/upload-url?${qs}`,
+    { method: "POST", idToken },
+  );
 }
 export function getArchiveDownloadUrl(idToken: string, key: string) {
   const qs = new URLSearchParams({ key });
@@ -301,12 +316,28 @@ export function getArchiveDownloadUrl(idToken: string, key: string) {
     { method: "POST", idToken },
   );
 }
+/** Permanently delete a file from the caller's own personal folder. */
+export function deleteArchiveFile(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ ok: boolean }>(
+    `/archive/file?${qs}`,
+    { method: "DELETE", idToken },
+  );
+}
 /** Publish an archived item and get back a shareable link (same token mechanism as setFilePublic below). */
 export function setArchivePublic(idToken: string, key: string) {
   const qs = new URLSearchParams({ key });
   return request<{ token: string; publicUrl: string }>(
     `/archive/public?${qs}`,
     { method: "POST", idToken },
+  );
+}
+/** Revoke public sharing for an archived item. */
+export function unsetArchivePublic(idToken: string, key: string) {
+  const qs = new URLSearchParams({ key });
+  return request<{ public: boolean }>(
+    `/archive/public?${qs}`,
+    { method: "DELETE", idToken },
   );
 }
 

@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   listMounts, searchFiles, getDownloadUrl, Mount, SearchResult,
-  listArchive, getArchiveDownloadUrl, setArchivePublic, ArchiveFile,
+  listArchive, getArchiveDownloadUrl, getArchiveUploadUrl, deleteArchiveFile, ArchiveFile,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
+import { ArchivePublicCell } from "../components/ArchivePublicCell";
 import { categoryFor } from "../lib/fileTypes";
+import { useDropUpload } from "../lib/useDropUpload";
+import { DownloadIcon, TrashIcon } from "../lib/icons";
 
 function fmtBytes(n: number) {
   if (!n) return "—";
@@ -23,6 +26,7 @@ export default function Home() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [archiveFiles, setArchiveFiles] = useState<ArchiveFile[]>([]);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
 
   // Global search.
   const [q, setQ] = useState("");
@@ -76,13 +80,15 @@ export default function Home() {
     } catch (e: any) { alert(e.message ?? "Download failed"); }
   };
 
-  const shareArchived = async (key: string) => {
+  const removeArchived = async (f: ArchiveFile) => {
     if (!idToken) return;
+    if (!confirm(`Permanently delete "${f.name}"? This deletes the file from S3 and cannot be undone.`)) return;
     try {
-      const { publicUrl } = await setArchivePublic(idToken, key);
-      await navigator.clipboard.writeText(publicUrl);
-      alert(`Link copied:\n${publicUrl}`);
-    } catch (e: any) { alert(e.message ?? "Couldn't create a share link"); }
+      await deleteArchiveFile(idToken, f.key);
+      setArchiveFiles((prev) => prev.filter((x) => x.key !== f.key));
+    } catch (e: any) {
+      alert(e.message ?? "Delete failed");
+    }
   };
 
   const play = async (f: SearchResult, kind: "video" | "audio") => {
@@ -93,8 +99,40 @@ export default function Home() {
     } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
+  // Drag-and-drop onto the home page uploads into the caller's own personal
+  // folder (user_sharing_default/<email>/ — same target the mobile app's
+  // Share Extension uses), not any particular mount.
+  const uploadToArchive = async (list: File[]) => {
+    if (!idToken || !list.length) return;
+    let done = 0;
+    setUploadMsg(`Uploading 0/${list.length}…`);
+    try {
+      for (const file of list) {
+        const { uploadUrl } = await getArchiveUploadUrl(idToken, file.name);
+        const res = await fetch(uploadUrl, { method: "PUT", body: file });
+        if (!res.ok) throw new Error(`Upload failed for ${file.name} (HTTP ${res.status})`);
+        done++;
+        setUploadMsg(`Uploading ${done}/${list.length}…`);
+      }
+      setUploadMsg(`Uploaded ${done} file${done === 1 ? "" : "s"}.`);
+      const r = await listArchive(idToken);
+      setArchiveFiles(r.files);
+      setTimeout(() => setUploadMsg(null), 4000);
+    } catch (e: any) {
+      setUploadMsg(null);
+      alert(e.message ?? "Upload failed");
+    }
+  };
+  const { isDragging, dropProps } = useDropUpload(uploadToArchive);
+
   return (
-    <div>
+    <div {...dropProps}>
+      {isDragging && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-text">Drop to upload to your personal folder</div>
+        </div>
+      )}
+      {uploadMsg && <p className="muted">{uploadMsg}</p>}
       <h2>Search files</h2>
       <form onSubmit={runSearch} style={{ display: "flex", gap: 8, maxWidth: 640 }}>
         <input
@@ -159,7 +197,15 @@ export default function Home() {
                               ▶ Play
                             </button>
                           )}
-                          <button onClick={() => download(f.mountPath, f.path)}>Download</button>
+                          <button
+                            type="button"
+                            onClick={() => download(f.mountPath, f.path)}
+                            title="Download"
+                            aria-label={`Download ${f.name}`}
+                            style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                          >
+                            <DownloadIcon />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -171,31 +217,48 @@ export default function Home() {
         </div>
       )}
 
+      <h2 style={{ marginTop: "1.5rem" }}>Recently shared</h2>
+      <p className="muted">Things you've shared into the app from elsewhere (e.g. the mobile app).</p>
       {archiveFiles.length > 0 && (
-        <>
-          <h2 style={{ marginTop: "1.5rem" }}>Recently shared</h2>
-          <p className="muted">Things you've shared into the app from elsewhere (e.g. the mobile app).</p>
-          <table>
-            <thead><tr>
-              <th>Name</th><th style={{ width: 110 }}>Size</th><th style={{ width: 160 }}></th>
-            </tr></thead>
-            <tbody>
-              {archiveFiles.map((f) => (
-                <tr key={f.key}>
-                  <td>{f.name}</td>
-                  <td>{fmtBytes(f.size)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button type="button" onClick={() => shareArchived(f.key)} style={{ marginRight: 8 }}>
-                      Get link
-                    </button>
-                    <button onClick={() => downloadArchived(f.key)}>Download</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+        <table>
+          <thead><tr>
+            <th>Name</th><th style={{ width: 110 }}>Size</th><th style={{ width: 140 }}></th>
+          </tr></thead>
+          <tbody>
+            {archiveFiles.slice(0, 5).map((f) => (
+              <tr key={f.key}>
+                <td>{f.name}</td>
+                <td>{fmtBytes(f.size)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <span style={{ marginRight: 8 }}><ArchivePublicCell file={f} /></span>
+                  <button
+                    type="button"
+                    onClick={() => downloadArchived(f.key)}
+                    title="Download"
+                    aria-label={`Download ${f.name}`}
+                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                  >
+                    <DownloadIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => removeArchived(f)}
+                    title="Delete file"
+                    aria-label={`Delete ${f.name}`}
+                    style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
+      {/* Always present (not just once there are files) -- a standing way to
+          reach the full personal folder to browse or manage at any time. */}
+      <p><Link to="/archive">More…</Link></p>
 
       <h2 style={{ marginTop: "1.5rem" }}>Shared directories</h2>
       <p className="muted">Pick a directory to browse.</p>

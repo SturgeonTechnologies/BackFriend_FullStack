@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Callback from "./pages/Callback";
 import Home from "./pages/Home";
 import Browse from "./pages/Browse";
+import Archive from "./pages/Archive";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 
@@ -86,6 +87,19 @@ function Nav() {
 }
 
 export default function App() {
+  // Safety net: without this, dropping a file anywhere outside a page's own
+  // drop zone (e.g. onto the nav bar) makes the browser navigate away to
+  // open it instead of doing nothing.
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", prevent);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", prevent);
+    };
+  }, []);
+
   return (
     <>
       <Nav />
@@ -95,6 +109,7 @@ export default function App() {
           <Route path="/auth/callback" element={<Callback />} />
           <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />
           <Route path="/browse/:mountPath" element={<RequireAuth><Browse /></RequireAuth>} />
+          <Route path="/archive" element={<RequireAuth><Archive /></RequireAuth>} />
           <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="*" element={<p>Not found.</p>} />

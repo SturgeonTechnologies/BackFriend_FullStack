@@ -6,7 +6,7 @@ import {
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { TrashIcon } from "../lib/icons";
+import { DownloadIcon, TrashIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
@@ -274,7 +274,15 @@ function ExplorerFileActions({
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
       <PublicButton isPublic={isPublic} busy={busy} copied={copied} onToggle={togglePublic} onCopy={copy} />
       {playable && <button type="button" onClick={onPlay}>▶ Play</button>}
-      <button type="button" onClick={download}>Download</button>
+      <button
+        type="button"
+        onClick={download}
+        title="Download"
+        aria-label={`Download ${file.name}`}
+        style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+      >
+        <DownloadIcon />
+      </button>
       <button type="button" className="danger" onClick={remove} title="Delete file" aria-label={`Delete ${file.name}`}
         style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}>
         <TrashIcon />

@@ -1,10 +1,11 @@
-import { ClipboardIcon, YELLOW } from "./icons";
+import { ClipboardIcon, ShareIcon, ShareFillIcon, YELLOW } from "./icons";
 
 /**
- * The per-file "Public" toggle. When public, the button fills yellow and the
- * copy-link icon sits *inside* the button: clicking the icon copies the link
- * (stopPropagation), clicking the rest of the button makes the file private.
- * When private, it's yellow lettering with no icon.
+ * The per-file "Public" toggle. When public, the button fills yellow with a
+ * filled share icon, and the copy-link icon sits *inside* the button:
+ * clicking the icon copies the link (stopPropagation), clicking the rest of
+ * the button makes the file private. When private, it's an outline share
+ * icon with no fill.
  */
 export function PublicButton({
   isPublic, busy, copied, onToggle, onCopy,
@@ -25,16 +26,15 @@ export function PublicButton({
         background: isPublic ? YELLOW : "transparent",
         color: isPublic ? "#1a1d23" : YELLOW,
         border: `1px solid ${YELLOW}`,
-        padding: "4px 10px",
+        padding: "6px 8px",
         borderRadius: 6,
-        fontWeight: 600,
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
         cursor: busy ? "default" : "pointer",
       }}
     >
-      Public
+      {isPublic ? <ShareFillIcon /> : <ShareIcon />}
       {isPublic && (
         <span
           role="button"

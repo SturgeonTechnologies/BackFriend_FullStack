@@ -197,6 +197,26 @@ th { color: var(--muted); font-weight: 500; }
   pointer-events: none;
 }
 
+/* Drag-and-drop upload overlay (Home + Browse). */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(79, 140, 255, 0.08);
+  border: 3px dashed var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  pointer-events: none;
+}
+.drop-overlay-text {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.5rem;
+  font-size: 1.1rem;
+}
+
 /* Video/audio player modal. */
 .media-modal-backdrop {
   position: fixed;
