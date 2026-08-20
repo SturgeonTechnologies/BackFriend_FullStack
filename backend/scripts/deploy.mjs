@@ -200,6 +200,39 @@ async function main() {
     unlinkSync(overridesFile);
   }
 
+  // ---------- 2.5. SharesBucket CORS ----------
+  // SharesBucket is external (not CFN-managed -- see template.yaml), so its
+  // CORS policy can't be set declaratively in the template. Set it here on
+  // every deploy instead of leaving it a manual one-off: browser uploads PUT
+  // directly to a presigned S3 URL (frontend/src/pages/Browse.tsx), which
+  // silently fails with "Failed to fetch" if this is ever missing (e.g. the
+  // bucket gets recreated). Origins reuse the same allowedOrigins that gate
+  // the HTTP API, since those are exactly the origins the SPA is served from.
+  log(`Setting CORS on SharesBucket ${cfg.sharesBucket}`);
+  const corsConfig = {
+    CORSRules: [
+      {
+        AllowedOrigins: cfg.allowedOrigins ?? [cfg.siteOrigin ?? "http://localhost:5173"],
+        AllowedMethods: ["GET", "PUT", "HEAD"],
+        AllowedHeaders: ["*"],
+        ExposeHeaders: ["ETag"],
+        MaxAgeSeconds: 3000,
+      },
+    ],
+  };
+  const corsFile = resolve(BACKEND_DIR, ".deploy-cors.json");
+  writeFileSync(corsFile, JSON.stringify(corsConfig, null, 2));
+  try {
+    run("aws", [
+      "s3api", "put-bucket-cors",
+      "--bucket", cfg.sharesBucket,
+      "--region", cfg.sharesBucketRegion || region,
+      "--cors-configuration", `file://${corsFile}`,
+    ]);
+  } finally {
+    unlinkSync(corsFile);
+  }
+
   // ---------- 3. Wire Cognito triggers + hosted-UI theme + email ----------
   log("Wiring Cognito triggers, hosted-UI theme, and email config");
   await wireCognito({

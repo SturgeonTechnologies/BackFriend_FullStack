@@ -254,10 +254,14 @@ Resources:
                 Resource: !Sub "arn:aws:s3:::${ArtifactBucket}/*"
 
               # --- S3: SPA sync target — only the web/ prefix of the shares bucket ---
+              # PutBucketCORS is bucket-level (not object-level) -- deploy.mjs
+              # step 2.5 sets it on every deploy since SharesBucket is external
+              # and can't carry a CORS policy declaratively via the template.
               - Effect: Allow
                 Action:
                   - s3:ListBucket
                   - s3:GetBucketLocation
+                  - s3:PutBucketCORS
                 Resource: !Sub "arn:aws:s3:::${SharesBucket}"
               - Effect: Allow
                 Action:

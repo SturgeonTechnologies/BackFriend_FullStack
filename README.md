@@ -676,9 +676,12 @@ tab).
 > broad (service-level) for CloudFormation/Lambda/API Gateway/Cognito, which are
 > hard to resource-scope for a SAM deploy. Tighten later if desired.
 >
-> The bucket's Public Access Block + CORS are set out-of-band and are **not**
-> touched by CI. First-ever admin bootstrap (a real sign-in) also can't be done
-> by CI — do that yourself once the stack is live.
+> The bucket's Public Access Block is set out-of-band and is **not** touched by
+> CI. CORS **is** set by `deploy.mjs` on every deploy (step 2.5), using
+> `allowedOrigins` from the deploy config — this needs `s3:PutBucketCORS` on
+> SharesBucket in the deploy role's policy (see `infrastructure/github-oidc.yml`).
+> First-ever admin bootstrap (a real sign-in) also can't be done by CI — do
+> that yourself once the stack is live.
 
 ## Security notes
 
