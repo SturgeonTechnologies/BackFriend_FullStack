@@ -50,7 +50,12 @@ Parameters:
       with AccessDenied on PutObject).
   DistributionId:
     Type: String
-    Default: E26FQPCAP5752P
+    Default: EV4JYSUECGGK2
+    Description: >
+      schuit-sharing-frontend stack's current DistributionId output. Was
+      stale here (E26FQPCAP5752P, the pre-SAM-migration distribution) --
+      the frontend stack was recreated at some point since, with a new
+      distribution id, and this template never got updated to match.
   FrontendStackName:
     Type: String
     Default: schuit-sharing-frontend
