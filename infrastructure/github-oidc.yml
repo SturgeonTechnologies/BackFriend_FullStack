@@ -55,10 +55,19 @@ Parameters:
     Type: String
     Default: schuit-sharing
     Description: >
-      Prefix for this deployment's resources -- the CloudFormation stack,
-      Lambda functions, DynamoDB tables, log groups, the serverless
-      deployment bucket, and the SSM parameter path. Must match the
-      resourcePrefix used in your deploy.config.json.
+      Prefix for this deployment's DynamoDB tables and the SSM parameter
+      path (those genuinely follow "<ResourcePrefix>-<Stage>-*"). Must match
+      the resourcePrefix used in your deploy.config.json.
+  SamStackName:
+    Type: String
+    Default: schuit-sharing-sam
+    Description: >
+      deploy.config.<name>.json's stackName AND functionNamePrefix (the SAM
+      migration made these independent of ResourcePrefix/Stage -- they're
+      the same literal value in every config in this repo, not derived from
+      "<ResourcePrefix>-<Stage>" like the pre-SAM Serverless Framework
+      convention this template originally assumed). Used for the
+      CloudFormation stack, Lambda functions, and their log groups.
   Stage:
     Type: String
     Default: prod
@@ -123,7 +132,7 @@ Resources:
                   - cloudformation:GetTemplateSummary
                   - cloudformation:ListStackResources
                 Resource:
-                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/${ResourcePrefix}-${Stage}/*"
+                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/${SamStackName}/*"
               - Effect: Allow
                 Action:
                   - cloudformation:ValidateTemplate
@@ -133,7 +142,7 @@ Resources:
               # --- Lambda: this service's functions (+ a couple of read-only account calls) ---
               - Effect: Allow
                 Action: lambda:*
-                Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${ResourcePrefix}-${Stage}-*"
+                Resource: !Sub "arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${SamStackName}-*"
               - Effect: Allow
                 Action:
                   - lambda:GetAccountSettings
@@ -163,7 +172,7 @@ Resources:
                   - logs:DescribeLogGroups
                   - logs:PutRetentionPolicy
                   - logs:TagResource
-                Resource: !Sub "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${ResourcePrefix}-${Stage}-*"
+                Resource: !Sub "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${SamStackName}-*"
 
               # --- IAM: only the roles serverless manages for this service, + pass to Lambda ---
               - Effect: Allow
