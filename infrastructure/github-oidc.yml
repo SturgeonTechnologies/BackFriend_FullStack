@@ -7,7 +7,28 @@ Description: >
 Parameters:
   GitHubRepo:
     Type: String
-    Default: SturgeonTechnologies/schuit-sharing
+    Default: SturgeonTechnologies/BackFriend_FullStack
+    Description: >
+      Informational only (shown in the role's tags) -- NOT what the trust
+      policy actually matches on. See RepositoryId.
+  RepositoryId:
+    Type: String
+    Default: "1219631445"
+    Description: >
+      The repo's immutable numeric ID (GitHub OIDC token claim
+      `repository_id`; find it via `gh api repos/<owner>/<repo> --jq .id`).
+      GitHub's `sub` claim switches to an `owner@ownerId/repo@repoId` format
+      after a repo rename (discovered the hard way -- see TODO.md), so a
+      trust policy matching on the plain "owner/repo" name breaks the first
+      time either gets renamed. This + RepositoryOwnerId are used instead,
+      via a wildcarded `sub` pattern (AWS requires a `sub` or
+      `job_workflow_ref` condition present -- a bare repository_id condition
+      alone is rejected) -- names can change again in the future without
+      breaking this.
+  RepositoryOwnerId:
+    Type: String
+    Default: "70855998"
+    Description: The org's immutable numeric ID (GitHub OIDC token claim `repository_owner_id`).
   GitHubBranch:
     Type: String
     Default: main
@@ -61,8 +82,14 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:repository_id: !Ref RepositoryId
+                token.actions.githubusercontent.com:ref: !Sub "refs/heads/${GitHubBranch}"
+              # AWS requires a sub/job_workflow_ref condition present (a bare
+              # repository_id condition is rejected as "not scoped to all")
+              # -- wildcard the org/repo NAMES, pin only the immutable IDs
+              # embedded in them, so this keeps working through future renames.
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+                token.actions.githubusercontent.com:sub: !Sub "repo:*@${RepositoryOwnerId}/*@${RepositoryId}:ref:refs/heads/${GitHubBranch}"
       Policies:
         - PolicyName: deploy
           PolicyDocument:
