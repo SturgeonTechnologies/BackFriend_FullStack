@@ -51,7 +51,8 @@ export function FileThumb({ category, name, loadUrl, onPlay, onOpen, size = 40 }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inView, category, url, failed]);
 
-  const clickable = !!onPlay;
+  const handler = onPlay ?? onOpen;
+  const clickable = !!handler;
   const showMedia = !!url && !failed && (category === "image" || category === "video");
 
   const mediaStyle: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover", display: "block" };
@@ -61,8 +62,8 @@ export function FileThumb({ category, name, loadUrl, onPlay, onOpen, size = 40 }
       ref={ref}
       className="file-thumb"
       style={{ width: size, height: size, cursor: clickable ? "pointer" : "default" }}
-      onClick={clickable ? onPlay : undefined}
-      title={clickable ? `Play ${name}` : undefined}
+      onClick={clickable ? handler : undefined}
+      title={clickable ? (onPlay ? `Play ${name}` : `View ${name}`) : undefined}
     >
       {category === "image" && showMedia && (
         <img src={url!} alt="" loading="lazy" onError={() => setFailed(true)} style={mediaStyle} />
@@ -82,7 +83,7 @@ export function FileThumb({ category, name, loadUrl, onPlay, onOpen, size = 40 }
         />
       )}
       {!showMedia && <span style={{ fontSize: size * 0.5, lineHeight: 1 }}>{emojiFor(category)}</span>}
-      {clickable && <span className="file-thumb-play">▶</span>}
+      {!!onPlay && <span className="file-thumb-play">▶</span>}
     </div>
   );
 }
