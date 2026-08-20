@@ -6,8 +6,10 @@ interface FileThumbProps {
   name: string;
   /** Fetches a presigned GET URL for this file. Only called once the thumb scrolls into view. */
   loadUrl: () => Promise<string>;
-  /** If set, the thumb becomes clickable (video/audio) and opens the player. */
+  /** If set, the thumb becomes clickable (video/audio) and opens the player, with a ▶ overlay. */
   onPlay?: () => void;
+  /** If set (images/gifs), the thumb becomes clickable and opens the full-size viewer -- no ▶ overlay. */
+  onOpen?: () => void;
   size?: number;
 }
 
@@ -17,7 +19,7 @@ interface FileThumbProps {
  * no canvas, so no CORS requirement on the shares bucket); everything else
  * falls back to a category emoji. Playable types get a ▶ overlay.
  */
-export function FileThumb({ category, name, loadUrl, onPlay, size = 40 }: FileThumbProps) {
+export function FileThumb({ category, name, loadUrl, onPlay, onOpen, size = 40 }: FileThumbProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
   const [url, setUrl] = useState<string | null>(null);

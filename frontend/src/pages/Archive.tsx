@@ -6,6 +6,10 @@ import {
 import { useAuth } from "../lib/auth";
 import { useDropUpload } from "../lib/useDropUpload";
 import { ArchivePublicCell } from "../components/ArchivePublicCell";
+import { FileThumb } from "../components/FileThumb";
+import { MediaPlayer } from "../components/MediaPlayer";
+import { ImageViewer } from "../components/ImageViewer";
+import { categoryFor } from "../lib/fileTypes";
 import { DownloadIcon, TrashIcon, UploadIcon } from "../lib/icons";
 
 function fmtBytes(n: number) {
@@ -28,6 +32,8 @@ export default function Archive() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFirstPage = useCallback(async () => {
@@ -102,6 +108,22 @@ export default function Archive() {
     } catch (e: any) { alert(e.message ?? "Download failed"); }
   };
 
+  const play = async (f: ArchiveFile, kind: "video" | "audio") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setPlaying({ url: downloadUrl, name: f.name, kind });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
+  const viewImage = async (f: ArchiveFile) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setViewingImage({ url: downloadUrl, name: f.name });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
   const remove = async (f: ArchiveFile) => {
     if (!idToken) return;
     if (!confirm(`Permanently delete "${f.name}"? This deletes the file from S3 and cannot be undone.`)) return;
@@ -129,62 +151,78 @@ export default function Archive() {
       {err && <p className="err">{err}</p>}
       {uploadMsg && <p className="muted">{uploadMsg}</p>}
       {loading && <p className="muted">Loading…</p>}
-      <table>
-        <thead><tr>
-          <th>Name</th><th style={{ width: 110 }}>Size</th><th style={{ width: 180 }}>Modified</th>
-          <th style={{ width: 160 }}>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              title="Add file(s)"
-              aria-label="Add file(s)"
-              style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
-            >
-              <UploadIcon />
-            </button>
-          </th>
-        </tr></thead>
-        <tbody>
-          {files.map((f) => (
-            <tr key={f.key}>
-              <td>{f.name}</td>
-              <td>{fmtBytes(f.size)}</td>
-              <td className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</td>
-              <td style={{ whiteSpace: "nowrap" }}>
-                <span style={{ marginRight: 8 }}><ArchivePublicCell file={f} /></span>
-                <button
-                  type="button"
-                  onClick={() => download(f.key)}
-                  title="Download"
-                  aria-label={`Download ${f.name}`}
-                  style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                >
-                  <DownloadIcon />
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => remove(f)}
-                  title="Delete file"
-                  aria-label={`Delete ${f.name}`}
-                  style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                >
-                  <TrashIcon />
-                </button>
-              </td>
-            </tr>
-          ))}
-          {!loading && !files.length && (
-            <tr><td colSpan={4} className="muted" style={{ padding: "1rem" }}>Nothing here yet.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          title="Add file(s)"
+          aria-label="Add file(s)"
+          style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+        >
+          <UploadIcon />
+        </button>
+      </div>
+      <div className="file-list">
+        {files.map((f) => {
+          const cat = categoryFor(f.name);
+          const playable = cat === "video" || cat === "audio";
+          return (
+            <div className="file-row" key={f.key}>
+              <FileThumb
+                category={cat}
+                name={f.name}
+                loadUrl={() => getArchiveDownloadUrl(idToken!, f.key).then((r) => r.downloadUrl)}
+                onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+                onOpen={cat === "image" ? () => viewImage(f) : undefined}
+              />
+              <div className="file-row-main">
+                <div className="file-row-top">
+                  <span className="file-row-name" title={f.name}>{f.name}</span>
+                  <span className="file-row-size muted">{fmtBytes(f.size)}</span>
+                </div>
+                <div className="file-row-bottom">
+                  <span className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</span>
+                  <ArchivePublicCell file={f} />
+                  <button
+                    type="button"
+                    onClick={() => download(f.key)}
+                    title="Download"
+                    aria-label={`Download ${f.name}`}
+                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                  >
+                    <DownloadIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => remove(f)}
+                    title="Delete file"
+                    aria-label={`Delete ${f.name}`}
+                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {!loading && !files.length && (
+          <p className="muted" style={{ padding: "1rem 0" }}>Nothing here yet.</p>
+        )}
+      </div>
       {truncated && (
         <p>
           <button type="button" className="secondary" disabled={loadingMore} onClick={loadMore}>
             {loadingMore ? "Loading…" : "Load more"}
           </button>
         </p>
+      )}
+      {playing && (
+        <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
+      {viewingImage && (
+        <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
       )}
     </div>
   );

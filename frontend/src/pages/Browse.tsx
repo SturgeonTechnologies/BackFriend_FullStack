@@ -10,6 +10,7 @@ import { DownloadIcon, TrashIcon, UploadIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
+import { ImageViewer } from "../components/ImageViewer";
 import { categoryFor } from "../lib/fileTypes";
 import { useDropUpload } from "../lib/useDropUpload";
 
@@ -96,6 +97,7 @@ export default function Browse() {
   const [loading, setLoading] = useState(true);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -131,6 +133,16 @@ export default function Browse() {
     try {
       const { downloadUrl, filename } = await getDownloadUrl(idToken, mountPath, f.path);
       setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
+    }
+  };
+
+  const viewImage = async (f: BrowseFile) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, mountPath, f.path);
+      setViewingImage({ url: downloadUrl, name: filename ?? f.name });
     } catch (e: any) {
       alert(e.message ?? "Couldn't open preview");
     }
@@ -229,6 +241,7 @@ export default function Browse() {
                 name={f.name}
                 loadUrl={() => getDownloadUrl(idToken!, mountPath, f.path).then((r) => r.downloadUrl)}
                 onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+                onOpen={cat === "image" ? () => viewImage(f) : undefined}
               />
               <div className="file-row-main">
                 <div className="file-row-top">
@@ -270,6 +283,9 @@ export default function Browse() {
       </div>
       {playing && (
         <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
+      {viewingImage && (
+        <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
       )}
     </div>
   );

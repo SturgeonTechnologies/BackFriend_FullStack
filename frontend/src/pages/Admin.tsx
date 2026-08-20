@@ -6,10 +6,11 @@ import {
   exploreDownloadUrl, exploreDeleteFile, exploreSetPublic, exploreUnsetPublic,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { DownloadIcon, TrashIcon } from "../lib/icons";
+import { ArrowBarLeftIcon, DownloadIcon, FolderIcon, PlusIcon, SlashIcon, TrashIcon } from "../lib/icons";
 import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
+import { ImageViewer } from "../components/ImageViewer";
 import { categoryFor } from "../lib/fileTypes";
 
 export default function Admin() {
@@ -212,14 +213,6 @@ function humanizeName(leaf: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024, i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
 // Parent of an S3 prefix: "Video/Movies/" → "Video/", "Video/" → "".
 function parentPrefix(p: string): string {
   const t = p.replace(/\/$/, "");
@@ -387,6 +380,7 @@ function MountsCard() {
   const [expErr, setExpErr] = useState<string | null>(null);
   const [expLoading, setExpLoading] = useState(false);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   // "Create directory" popup state.
@@ -430,6 +424,16 @@ function MountsCard() {
     try {
       const { downloadUrl, filename } = await exploreDownloadUrl(idToken, f.path);
       setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
+    }
+  };
+
+  const viewExploreImage = async (f: ExploreFile) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await exploreDownloadUrl(idToken, f.path);
+      setViewingImage({ url: downloadUrl, name: filename ?? f.name });
     } catch (e: any) {
       alert(e.message ?? "Couldn't open preview");
     }
@@ -562,11 +566,27 @@ function MountsCard() {
           click <strong>Add mount</strong>.
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-          <button type="button" className="secondary" disabled={!expPrefix || expLoading} onClick={() => loadExplore("")}>
-            Root
+          <button
+            type="button"
+            className="secondary"
+            disabled={!expPrefix || expLoading}
+            onClick={() => loadExplore("")}
+            title="Root"
+            aria-label="Root"
+            style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+          >
+            <SlashIcon />
           </button>
-          <button type="button" className="secondary" disabled={!expPrefix || expLoading} onClick={() => loadExplore(parentPrefix(expPrefix))}>
-            Up
+          <button
+            type="button"
+            className="secondary"
+            disabled={!expPrefix || expLoading}
+            onClick={() => loadExplore(parentPrefix(expPrefix))}
+            title="Up"
+            aria-label="Up"
+            style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+          >
+            <ArrowBarLeftIcon />
           </button>
           <code>/{expPrefix}</code>
           {expLoading && <span className="muted">Loading…</span>}
@@ -664,14 +684,16 @@ function MountsCard() {
         )}
         <table>
           <thead><tr>
-            <th>Name</th><th>Type</th><th>Size</th>
+            <th>Name</th>
             <th>
               <button
                 type="button"
                 onClick={() => { setNewDirName(""); setExpErr(null); setShowNewDir(true); }}
-                style={{ background: "var(--success)", color: "#0b1f13" }}
+                title="Create directory"
+                aria-label="Create directory"
+                style={{ background: "var(--success)", color: "#0b1f13", padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
               >
-                Create Directory
+                <PlusIcon />
               </button>
             </th>
           </tr></thead>
@@ -683,11 +705,26 @@ function MountsCard() {
                     📁 {f.name}/
                   </button>
                 </td>
-                <td className="muted">folder</td>
-                <td className="muted">—</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button type="button" onClick={() => useDirectory(f.path)}>Use this directory</button>
-                  <button type="button" className="danger" style={{ marginLeft: 8 }} onClick={() => openDeleteDir(f)}>Delete</button>
+                  <button
+                    type="button"
+                    onClick={() => useDirectory(f.path)}
+                    title="Use this directory"
+                    aria-label={`Use directory ${f.name}`}
+                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+                  >
+                    <FolderIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => openDeleteDir(f)}
+                    title="Delete directory"
+                    aria-label={`Delete directory ${f.name}`}
+                    style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center" }}
+                  >
+                    <TrashIcon />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -703,12 +740,11 @@ function MountsCard() {
                         name={f.name}
                         loadUrl={() => exploreDownloadUrl(idToken!, f.path).then((r) => r.downloadUrl)}
                         onPlay={playable ? () => playExploreFile(f, cat as "video" | "audio") : undefined}
+                        onOpen={cat === "image" ? () => viewExploreImage(f) : undefined}
                       />
                       {f.name}
                     </div>
                   </td>
-                  <td className="muted">file</td>
-                  <td className="muted">{formatSize(f.size)}</td>
                   <td>
                     <ExplorerFileActions
                       file={f}
@@ -721,10 +757,10 @@ function MountsCard() {
               );
             })}
             {exp && !exp.folders.length && !exp.files.length && (
-              <tr><td colSpan={4} className="muted">This directory is empty.</td></tr>
+              <tr><td colSpan={2} className="muted">This directory is empty.</td></tr>
             )}
             {!exp && !expErr && (
-              <tr><td colSpan={4} className="muted">Loading…</td></tr>
+              <tr><td colSpan={2} className="muted">Loading…</td></tr>
             )}
           </tbody>
         </table>
@@ -852,6 +888,9 @@ function MountsCard() {
       )}
       {playing && (
         <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
+      {viewingImage && (
+        <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
       )}
     </>
   );

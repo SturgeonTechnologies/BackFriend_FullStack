@@ -7,6 +7,7 @@ import {
 import { useAuth } from "../lib/auth";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
+import { ImageViewer } from "../components/ImageViewer";
 import { ArchivePublicCell } from "../components/ArchivePublicCell";
 import { categoryFor } from "../lib/fileTypes";
 import { useDropUpload } from "../lib/useDropUpload";
@@ -35,6 +36,7 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!idToken) return;
@@ -96,6 +98,30 @@ export default function Home() {
     try {
       const { downloadUrl, filename } = await getDownloadUrl(idToken, f.mountPath, f.path);
       setPlaying({ url: downloadUrl, name: filename ?? f.name, kind });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
+  const viewImage = async (f: SearchResult) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, f.mountPath, f.path);
+      setViewingImage({ url: downloadUrl, name: filename ?? f.name });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
+  const playArchived = async (f: ArchiveFile, kind: "video" | "audio") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setPlaying({ url: downloadUrl, name: f.name, kind });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
+  const viewArchiveImage = async (f: ArchiveFile) => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setViewingImage({ url: downloadUrl, name: f.name });
     } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
@@ -179,6 +205,7 @@ export default function Home() {
                               name={f.name}
                               loadUrl={() => getDownloadUrl(idToken!, f.mountPath, f.path).then((r) => r.downloadUrl)}
                               onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
+                              onOpen={cat === "image" ? () => viewImage(f) : undefined}
                               size={32}
                             />
                             {f.name}
@@ -220,41 +247,52 @@ export default function Home() {
       <h2 style={{ marginTop: "1.5rem" }}>Recently shared</h2>
       <p className="muted">Things you've shared into the app from elsewhere (e.g. the mobile app).</p>
       {archiveFiles.length > 0 && (
-        <table>
-          <thead><tr>
-            <th>Name</th><th style={{ width: 110 }}>Size</th><th style={{ width: 140 }}></th>
-          </tr></thead>
-          <tbody>
-            {archiveFiles.slice(0, 5).map((f) => (
-              <tr key={f.key}>
-                <td>{f.name}</td>
-                <td>{fmtBytes(f.size)}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  <span style={{ marginRight: 8 }}><ArchivePublicCell file={f} /></span>
-                  <button
-                    type="button"
-                    onClick={() => downloadArchived(f.key)}
-                    title="Download"
-                    aria-label={`Download ${f.name}`}
-                    style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                  >
-                    <DownloadIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    onClick={() => removeArchived(f)}
-                    title="Delete file"
-                    aria-label={`Delete ${f.name}`}
-                    style={{ marginLeft: 8, padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
-                  >
-                    <TrashIcon />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="file-list">
+          {archiveFiles.slice(0, 5).map((f) => {
+            const cat = categoryFor(f.name);
+            const playable = cat === "video" || cat === "audio";
+            return (
+              <div className="file-row" key={f.key}>
+                <FileThumb
+                  category={cat}
+                  name={f.name}
+                  loadUrl={() => getArchiveDownloadUrl(idToken!, f.key).then((r) => r.downloadUrl)}
+                  onPlay={playable ? () => playArchived(f, cat as "video" | "audio") : undefined}
+                  onOpen={cat === "image" ? () => viewArchiveImage(f) : undefined}
+                />
+                <div className="file-row-main">
+                  <div className="file-row-top">
+                    <span className="file-row-name" title={f.name}>{f.name}</span>
+                    <span className="file-row-size muted">{fmtBytes(f.size)}</span>
+                  </div>
+                  <div className="file-row-bottom">
+                    <span className="muted">{f.lastModified ? new Date(f.lastModified).toLocaleDateString() : "—"}</span>
+                    <ArchivePublicCell file={f} />
+                    <button
+                      type="button"
+                      onClick={() => downloadArchived(f.key)}
+                      title="Download"
+                      aria-label={`Download ${f.name}`}
+                      style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                    >
+                      <DownloadIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => removeArchived(f)}
+                      title="Delete file"
+                      aria-label={`Delete ${f.name}`}
+                      style={{ padding: "6px 8px", display: "inline-flex", alignItems: "center", verticalAlign: "middle" }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
       {/* Always present (not just once there are files) -- a standing way to
           reach the full personal folder to browse or manage at any time. */}
@@ -284,6 +322,9 @@ export default function Home() {
       </div>
       {playing && (
         <MediaPlayer url={playing.url} name={playing.name} kind={playing.kind} onClose={() => setPlaying(null)} />
+      )}
+      {viewingImage && (
+        <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
       )}
     </div>
   );
