@@ -33,6 +33,25 @@ jobs:
           node-version: "20"
       - uses: aws-actions/setup-sam@v2
 
+      # TEMPORARY debug step -- diagnosing a persistent "Not authorized to
+      # perform sts:AssumeRoleWithWebIdentity" despite the trust policy's sub
+      # condition matching what we expect. Prints the actual decoded claims
+      # GitHub is issuing so we can compare against the IAM trust policy
+      # exactly, instead of guessing. Remove once resolved.
+      - name: Debug OIDC token claims
+        run: |
+          python3 -c "
+          import base64, json, urllib.request, os
+          req = urllib.request.Request(
+              os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=sts.amazonaws.com',
+              headers={'Authorization': 'bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']},
+          )
+          token = json.load(urllib.request.urlopen(req))['value']
+          payload = token.split('.')[1]
+          payload += '=' * (-len(payload) % 4)
+          print(json.dumps(json.loads(base64.urlsafe_b64decode(payload)), indent=2))
+          "
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
