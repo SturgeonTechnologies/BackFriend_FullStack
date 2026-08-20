@@ -11,6 +11,7 @@ import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { DocViewer } from "../components/DocViewer";
 import { EmailChips } from "../components/EmailChips";
 import { categoryFor } from "../lib/fileTypes";
 import { useDropUpload } from "../lib/useDropUpload";
@@ -175,6 +176,7 @@ export default function Browse() {
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ kind: "pdf" | "text"; url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -221,6 +223,16 @@ export default function Browse() {
     try {
       const { downloadUrl, filename } = await getDownloadUrl(idToken, mountPath, f.path);
       setViewingImage({ url: downloadUrl, name: filename ?? f.name });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
+    }
+  };
+
+  const viewDoc = async (f: BrowseFile, kind: "pdf" | "text") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, mountPath, f.path);
+      setViewingDoc({ kind, url: downloadUrl, name: filename ?? f.name });
     } catch (e: any) {
       alert(e.message ?? "Couldn't open preview");
     }
@@ -324,7 +336,11 @@ export default function Browse() {
                 name={f.name}
                 loadUrl={() => getDownloadUrl(idToken!, mountPath, f.path).then((r) => r.downloadUrl)}
                 onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
-                onOpen={cat === "image" ? () => viewImage(f) : undefined}
+                onOpen={
+                  cat === "image" ? () => viewImage(f)
+                  : cat === "pdf" || cat === "text" ? () => viewDoc(f, cat)
+                  : undefined
+                }
               />
               <div className="file-row-main">
                 <div className="file-row-top">
@@ -369,6 +385,9 @@ export default function Browse() {
       )}
       {viewingImage && (
         <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
+      )}
+      {viewingDoc && (
+        <DocViewer kind={viewingDoc.kind} url={viewingDoc.url} name={viewingDoc.name} onClose={() => setViewingDoc(null)} />
       )}
       {showManageAccess && (
         <ManageAccessModal mountPath={mountPath} displayName={displayName} onClose={() => setShowManageAccess(false)} />

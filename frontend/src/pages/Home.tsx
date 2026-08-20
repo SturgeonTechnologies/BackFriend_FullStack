@@ -8,6 +8,7 @@ import { useAuth } from "../lib/auth";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { DocViewer } from "../components/DocViewer";
 import { ArchivePublicCell } from "../components/ArchivePublicCell";
 import { categoryFor } from "../lib/fileTypes";
 import { useDropUpload } from "../lib/useDropUpload";
@@ -37,6 +38,7 @@ export default function Home() {
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ kind: "pdf" | "text"; url: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!idToken) return;
@@ -109,6 +111,14 @@ export default function Home() {
     } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
+  const viewDoc = async (f: SearchResult, kind: "pdf" | "text") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await getDownloadUrl(idToken, f.mountPath, f.path);
+      setViewingDoc({ kind, url: downloadUrl, name: filename ?? f.name });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
   const playArchived = async (f: ArchiveFile, kind: "video" | "audio") => {
     if (!idToken) return;
     try {
@@ -122,6 +132,14 @@ export default function Home() {
     try {
       const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
       setViewingImage({ url: downloadUrl, name: f.name });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
+  const viewArchiveDoc = async (f: ArchiveFile, kind: "pdf" | "text") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setViewingDoc({ kind, url: downloadUrl, name: f.name });
     } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
@@ -205,7 +223,11 @@ export default function Home() {
                               name={f.name}
                               loadUrl={() => getDownloadUrl(idToken!, f.mountPath, f.path).then((r) => r.downloadUrl)}
                               onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
-                              onOpen={cat === "image" ? () => viewImage(f) : undefined}
+                              onOpen={
+                                cat === "image" ? () => viewImage(f)
+                                : cat === "pdf" || cat === "text" ? () => viewDoc(f, cat)
+                                : undefined
+                              }
                               size={32}
                             />
                             {f.name}
@@ -258,7 +280,11 @@ export default function Home() {
                   name={f.name}
                   loadUrl={() => getArchiveDownloadUrl(idToken!, f.key).then((r) => r.downloadUrl)}
                   onPlay={playable ? () => playArchived(f, cat as "video" | "audio") : undefined}
-                  onOpen={cat === "image" ? () => viewArchiveImage(f) : undefined}
+                  onOpen={
+                    cat === "image" ? () => viewArchiveImage(f)
+                    : cat === "pdf" || cat === "text" ? () => viewArchiveDoc(f, cat)
+                    : undefined
+                  }
                 />
                 <div className="file-row-main">
                   <div className="file-row-top">
@@ -325,6 +351,9 @@ export default function Home() {
       )}
       {viewingImage && (
         <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
+      )}
+      {viewingDoc && (
+        <DocViewer kind={viewingDoc.kind} url={viewingDoc.url} name={viewingDoc.name} onClose={() => setViewingDoc(null)} />
       )}
     </div>
   );

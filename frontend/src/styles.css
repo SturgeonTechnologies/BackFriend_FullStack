@@ -310,3 +310,19 @@ th { color: var(--muted); font-weight: 500; }
   white-space: nowrap;
 }
 .media-modal-close { padding: 0.3rem 0.6rem; }
+
+/* PDF/text preview -- reuses .media-modal chrome, adds a fixed height so the
+   iframe/text body has room to scroll (unlike video/audio, content here is
+   arbitrarily long, not intrinsically sized). */
+.doc-modal { display: flex; flex-direction: column; height: 85vh; max-width: 900px; }
+.doc-viewer-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.doc-viewer-text {
+  flex: 1;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}

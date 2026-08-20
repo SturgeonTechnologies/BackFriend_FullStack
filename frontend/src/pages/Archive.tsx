@@ -9,6 +9,7 @@ import { ArchivePublicCell } from "../components/ArchivePublicCell";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { DocViewer } from "../components/DocViewer";
 import { categoryFor } from "../lib/fileTypes";
 import { DownloadIcon, TrashIcon, UploadIcon } from "../lib/icons";
 
@@ -34,6 +35,7 @@ export default function Archive() {
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ kind: "pdf" | "text"; url: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFirstPage = useCallback(async () => {
@@ -124,6 +126,14 @@ export default function Archive() {
     } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
   };
 
+  const viewDoc = async (f: ArchiveFile, kind: "pdf" | "text") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl } = await getArchiveDownloadUrl(idToken, f.key);
+      setViewingDoc({ kind, url: downloadUrl, name: f.name });
+    } catch (e: any) { alert(e.message ?? "Couldn't open preview"); }
+  };
+
   const remove = async (f: ArchiveFile) => {
     if (!idToken) return;
     if (!confirm(`Permanently delete "${f.name}"? This deletes the file from S3 and cannot be undone.`)) return;
@@ -173,7 +183,11 @@ export default function Archive() {
                 name={f.name}
                 loadUrl={() => getArchiveDownloadUrl(idToken!, f.key).then((r) => r.downloadUrl)}
                 onPlay={playable ? () => play(f, cat as "video" | "audio") : undefined}
-                onOpen={cat === "image" ? () => viewImage(f) : undefined}
+                onOpen={
+                  cat === "image" ? () => viewImage(f)
+                  : cat === "pdf" || cat === "text" ? () => viewDoc(f, cat)
+                  : undefined
+                }
               />
               <div className="file-row-main">
                 <div className="file-row-top">
@@ -223,6 +237,9 @@ export default function Archive() {
       )}
       {viewingImage && (
         <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
+      )}
+      {viewingDoc && (
+        <DocViewer kind={viewingDoc.kind} url={viewingDoc.url} name={viewingDoc.name} onClose={() => setViewingDoc(null)} />
       )}
     </div>
   );

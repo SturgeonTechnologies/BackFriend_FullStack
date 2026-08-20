@@ -11,6 +11,7 @@ import { PublicButton } from "../lib/PublicButton";
 import { FileThumb } from "../components/FileThumb";
 import { MediaPlayer } from "../components/MediaPlayer";
 import { ImageViewer } from "../components/ImageViewer";
+import { DocViewer } from "../components/DocViewer";
 import { EmailChips } from "../components/EmailChips";
 import { categoryFor } from "../lib/fileTypes";
 
@@ -312,6 +313,7 @@ function MountsCard() {
   const [expLoading, setExpLoading] = useState(false);
   const [playing, setPlaying] = useState<{ url: string; name: string; kind: "video" | "audio" } | null>(null);
   const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ kind: "pdf" | "text"; url: string; name: string } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   // "Create directory" popup state.
@@ -366,6 +368,16 @@ function MountsCard() {
     try {
       const { downloadUrl, filename } = await exploreDownloadUrl(idToken, f.path);
       setViewingImage({ url: downloadUrl, name: filename ?? f.name });
+    } catch (e: any) {
+      alert(e.message ?? "Couldn't open preview");
+    }
+  };
+
+  const viewExploreDoc = async (f: ExploreFile, kind: "pdf" | "text") => {
+    if (!idToken) return;
+    try {
+      const { downloadUrl, filename } = await exploreDownloadUrl(idToken, f.path);
+      setViewingDoc({ kind, url: downloadUrl, name: filename ?? f.name });
     } catch (e: any) {
       alert(e.message ?? "Couldn't open preview");
     }
@@ -679,7 +691,11 @@ function MountsCard() {
                         name={f.name}
                         loadUrl={() => exploreDownloadUrl(idToken!, f.path).then((r) => r.downloadUrl)}
                         onPlay={playable ? () => playExploreFile(f, cat as "video" | "audio") : undefined}
-                        onOpen={cat === "image" ? () => viewExploreImage(f) : undefined}
+                        onOpen={
+                          cat === "image" ? () => viewExploreImage(f)
+                          : cat === "pdf" || cat === "text" ? () => viewExploreDoc(f, cat)
+                          : undefined
+                        }
                       />
                       {f.name}
                     </div>
@@ -846,6 +862,9 @@ function MountsCard() {
       )}
       {viewingImage && (
         <ImageViewer url={viewingImage.url} name={viewingImage.name} onClose={() => setViewingImage(null)} />
+      )}
+      {viewingDoc && (
+        <DocViewer kind={viewingDoc.kind} url={viewingDoc.url} name={viewingDoc.name} onClose={() => setViewingDoc(null)} />
       )}
     </>
   );
