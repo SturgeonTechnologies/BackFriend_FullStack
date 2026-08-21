@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   createInvite, revokeInvite, listAccess, AccessEntry,
   createMount, deleteMount, updateMount, listMounts, Mount,
@@ -173,23 +174,31 @@ function InvitesCard() {
         </p>
         <table>
           <thead><tr>
-            <th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th></th>
+            <th>Email</th><th>Role</th><th></th>
           </tr></thead>
           <tbody>
-            {access.map((a) => (
-              <tr key={a.email}>
-                <td>{a.email}</td>
-                <td>{a.role === "admin" ? <strong>Admin</strong> : "Member"}</td>
-                <td className="muted">{a.status === "active" ? "Active" : "Invited (pending)"}</td>
-                <td className="muted">{a.expiresAt ? new Date(a.expiresAt).toLocaleDateString() : "—"}</td>
-                <td>
-                  {a.status === "pending" && (
-                    <button className="danger" onClick={() => handleRevoke(a.email)}>Revoke</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {!access.length && <tr><td colSpan={5} className="muted">No one has access yet.</td></tr>}
+            {access.map((a) => {
+              const expired = a.status === "pending" && !!a.expiresAt && new Date(a.expiresAt) < new Date();
+              return (
+                <tr key={a.email}>
+                  <td>
+                    <Link
+                      to={`/admin/users/${encodeURIComponent(a.email)}`}
+                      style={expired ? { textDecoration: "line-through" } : undefined}
+                    >
+                      {a.email}
+                    </Link>
+                  </td>
+                  <td>{a.role === "admin" ? <strong>Admin</strong> : "Member"}</td>
+                  <td>
+                    {a.status === "pending" && (
+                      <button className="danger" onClick={() => handleRevoke(a.email)}>Revoke</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!access.length && <tr><td colSpan={3} className="muted">No one has access yet.</td></tr>}
           </tbody>
         </table>
       </div>

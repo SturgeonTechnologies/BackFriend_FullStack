@@ -7,6 +7,7 @@ import Home from "./pages/Home";
 import Browse from "./pages/Browse";
 import Archive from "./pages/Archive";
 import Admin from "./pages/Admin";
+import AdminUserDetail from "./pages/AdminUserDetail";
 import Profile from "./pages/Profile";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -112,6 +113,7 @@ export default function App() {
           <Route path="/archive" element={<RequireAuth><Archive /></RequireAuth>} />
           <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+          <Route path="/admin/users/:email" element={<RequireAdmin><AdminUserDetail /></RequireAdmin>} />
           <Route path="*" element={<p>Not found.</p>} />
         </Routes>
       </main>

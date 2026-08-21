@@ -41,6 +41,9 @@ const HOSTED_UI_CSS = `.background-customizable {
 .banner-customizable {
   background-color: #171a21;
 }
+h1, h2 {
+  color: #ffffff;
+}
 .label-customizable {
   color: #ffffff;
 }
