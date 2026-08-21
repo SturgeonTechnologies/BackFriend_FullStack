@@ -429,9 +429,14 @@ async function main() {
           SitePrefix: "web",
           SiteBucketRegion: region,
         });
-        config.frontend = { distributionStackName: frontendStack };
+        config.frontend = {
+          distributionStackName: frontendStack,
+          redirectUri: `https://${domain}/auth/callback`,
+          logoutRedirect: `https://${domain}/`,
+          appTitle: config.appDisplayName,
+        };
         writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-        console.log(`==> Wrote "frontend": { "distributionStackName": "${frontendStack}" } into ${configPath}`);
+        console.log(`==> Wrote "frontend" (distributionStackName/redirectUri/logoutRedirect/appTitle) into ${configPath}`);
         if (backendDeployed) {
           console.log("==> Rebuilding + syncing the SPA to it");
           run("node", ["scripts/deploy.mjs", `deploy.config.${spaceName}.json`], { cwd: backendDir });
