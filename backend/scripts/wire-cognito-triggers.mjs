@@ -37,12 +37,10 @@ import {
 // resource for this, so we apply it here post-deploy (idempotent upsert).
 const HOSTED_UI_CSS = `.background-customizable {
   background-color: #0f1115;
+  color: #ffffff;
 }
 .banner-customizable {
   background-color: #171a21;
-}
-h1, h2 {
-  color: #ffffff;
 }
 .label-customizable {
   color: #ffffff;
