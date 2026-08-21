@@ -1,6 +1,6 @@
-# schuit-sharing
+# BackFriend Fullstack
 
-A mostly 'vibed' full stack application to assist with sharing between messaging applications and operating systems.  
+A mostly 'vibed' full stack application to assist with sharing between messaging applications and operating systems.  Completely serverless with AWS.  A mobile app is in the works to make it more native on the go.
 
 An invite-only web app for browsing and downloading files stored in S3. Auth is
 **Cognito** (Google, Facebook, or email + password), access is controlled per-mount, and admins
