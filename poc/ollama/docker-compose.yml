@@ -1,0 +1,48 @@
+# Base stack: Ollama (CPU-only) + Open WebUI.
+# GPU support is layered on with an override file -- up.sh picks the right one
+# and records it in .env as COMPOSE_FILE, so plain `docker compose ...` commands
+# keep working afterwards:
+#   gpu.nvidia.yml  -> NVIDIA (Linux w/ nvidia-container-toolkit, or WSL2 + Docker Desktop)
+#   gpu.amd.yml     -> AMD ROCm (Linux only)
+
+name: ollama-poc
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG:-latest}
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      # Keep a model loaded for 30m after last use so repeat prompts are instant.
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      # Named volume so model downloads (multi-GB) survive `down`/rebuilds.
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_TAG:-main}
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      # Local POC: skip the login screen. Flip to True before exposing beyond localhost.
+      - WEBUI_AUTH=${WEBUI_AUTH:-False}
+    volumes:
+      - open-webui-data:/app/backend/data
+
+volumes:
+  ollama-models:
+  open-webui-data:

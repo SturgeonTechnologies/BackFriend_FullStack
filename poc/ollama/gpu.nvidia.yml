@@ -1,0 +1,12 @@
+# NVIDIA override. Requires:
+#   Linux:  nvidia driver + nvidia-container-toolkit (`nvidia-ctk runtime configure --runtime=docker`)
+#   Windows: Docker Desktop on the WSL2 backend + a current NVIDIA Windows driver (no toolkit needed)
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

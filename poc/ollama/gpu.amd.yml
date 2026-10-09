@@ -1,0 +1,15 @@
+# AMD ROCm override (Linux only -- Docker can't pass AMD GPUs through on Windows/macOS).
+# Requires the amdgpu kernel driver; your user needs access to /dev/kfd and /dev/dri.
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_ROCM_TAG:-rocm}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # Numeric host GIDs (group *names* may not exist inside the image). up.sh fills these in.
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-110}"
+    # environment:
+    #   # Uncomment for consumer cards ROCm doesn't officially list (e.g. RX 6700 XT -> 10.3.0).
+    #   - HSA_OVERRIDE_GFX_VERSION=10.3.0
