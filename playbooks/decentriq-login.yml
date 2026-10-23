@@ -1,0 +1,130 @@
+---
+# decentriq-login.yml
+#
+# Authenticate to the Decentriq API (api.decentriq.vip) using credentials
+# supplied interactively at the CLI, capture the session token, and
+# (optionally) pull the account profile to prove the token works.
+#
+# The request/response shapes below were reverse-engineered from a captured
+# browser session (HAR). Key facts:
+#
+#   * Login:  POST /ipa/user/login   body {"name": <user>, "password": <pass>}
+#             -> JSON: {"code": 1, "message": "success",
+#                       "result": {"token": "...", "id": ..., "balance": ...}}
+#   * Authed: send the token back as the `token:` request header.
+#             (The /ipa/ad/config endpoint uses `x-token:` instead.)
+#   * Quirk:  the API answers with Content-Type: text/html even though the
+#             body is JSON, so we parse the raw content with `from_json`
+#             rather than relying on the uri module's `.json` attribute.
+#
+# Usage (prompts for username + password):
+#   ansible-playbook playbooks/decentriq-login.yml
+#
+# Non-interactive / automation (skips the prompts):
+#   ansible-playbook playbooks/decentriq-login.yml \
+#       -e dq_username=Ellie106 -e dq_password='changeme'
+#
+# Skip the profile lookup and just mint a token:
+#   ansible-playbook playbooks/decentriq-login.yml -e fetch_profile=false
+
+- name: Decentriq login
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  # vars_prompt only fires when the variable isn't already set (e.g. via -e),
+  # so the same playbook works interactively and in automation.
+  vars_prompt:
+    - name: dq_username
+      prompt: "Decentriq username"
+      private: false
+
+    - name: dq_password
+      prompt: "Decentriq password"
+      private: true
+
+  vars:
+    dq_base_url: "https://api.decentriq.vip"
+    # Mirror the browser's CORS headers; the API gates on Origin.
+    dq_origin: "https://decentriqnb.com"
+    # Set to false to stop after obtaining the token.
+    fetch_profile: true
+
+  tasks:
+    - name: Validate that credentials were provided
+      ansible.builtin.assert:
+        that:
+          - dq_username | default('') | length > 0
+          - dq_password | default('') | length > 0
+        fail_msg: "Both a username and password are required."
+        quiet: true
+
+    - name: Authenticate and request a session token
+      ansible.builtin.uri:
+        url: "{{ dq_base_url }}/ipa/user/login"
+        method: POST
+        body_format: json
+        body:
+          name: "{{ dq_username }}"
+          password: "{{ dq_password }}"
+        headers:
+          Content-Type: "application/json"
+          Origin: "{{ dq_origin }}"
+          Referer: "{{ dq_origin }}/"
+        status_code: 200
+        return_content: true
+      register: dq_login
+      no_log: true   # the request body contains the password
+
+    - name: Parse the login response
+      ansible.builtin.set_fact:
+        dq_login_json: "{{ dq_login.content | from_json }}"
+
+    - name: Fail if the API rejected the credentials
+      ansible.builtin.assert:
+        that:
+          - dq_login_json.code | int == 1
+        fail_msg: >-
+          Login failed: {{ dq_login_json.message | default('unknown error') }}
+          (code={{ dq_login_json.code | default('?') }})
+        quiet: true
+
+    - name: Store the session token
+      ansible.builtin.set_fact:
+        dq_token: "{{ dq_login_json.result.token }}"
+
+    - name: Report successful login
+      ansible.builtin.debug:
+        msg: >-
+          Logged in as {{ dq_login_json.result.name }}
+          (id={{ dq_login_json.result.id }}).
+          Token acquired: {{ dq_token[:6] }}… ({{ dq_token | length }} chars)
+
+    - name: Fetch account profile with the token (proves the token works)
+      ansible.builtin.uri:
+        url: "{{ dq_base_url }}/ipa/user/userinfo"
+        method: POST
+        body_format: json
+        body: {}
+        headers:
+          Content-Type: "application/json"
+          Origin: "{{ dq_origin }}"
+          Referer: "{{ dq_origin }}/"
+          token: "{{ dq_token }}"
+        status_code: 200
+        return_content: true
+      register: dq_userinfo
+      when: fetch_profile | bool
+
+    - name: Show selected profile fields
+      ansible.builtin.debug:
+        msg:
+          - "name:    {{ _info.name }}"
+          - "balance: {{ _info.balance }} {{ _info.networksymbol | default('') }}"
+          - "wallet:  {{ _info.walletaddress | default('n/a') }}"
+          - "phone:   {{ _info.phone | default('n/a') }}"
+      vars:
+        _info: "{{ (dq_userinfo.content | from_json).result }}"
+      when:
+        - fetch_profile | bool
+        - dq_userinfo is not skipped
