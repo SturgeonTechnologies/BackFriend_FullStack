@@ -1,0 +1,54 @@
+# BackFriend on Kubernetes. Start with docs/onprem/kubernetes.md.
+#   kubectl apply -k deploy/kubernetes
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: backfriend
+
+resources:
+  - namespace.yml
+  - storage.yml
+  - postgres.yml
+  - keycloak.yml
+  - app.yml
+  - backup.yml
+  - networkpolicy.yml
+  - ingress.yml
+  - ../keycloak
+  - ../postgres
+
+# Change the domain here. It's copied to the Ingress and its certificate below.
+configMapGenerator:
+  - name: backfriend-site
+    literals:
+      - SITE_HOST=sharing.schuit.io
+      - SITE_ORIGIN=https://sharing.schuit.io
+      - KC_HOSTNAME=https://sharing.schuit.io/idp
+      - OIDC_ISSUER=https://sharing.schuit.io/idp/realms/backfriend
+      - APP_DISPLAY_NAME=BackFriend
+      # Set to true after running configure-optional.sh for that provider.
+      - GOOGLE_ENABLED=false
+      - FACEBOOK_ENABLED=false
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: backfriend-site
+      fieldPath: data.SITE_HOST
+    targets:
+      - select:
+          kind: Ingress
+          name: backfriend
+        fieldPaths:
+          - spec.rules.0.host
+          - spec.tls.0.hosts.0
+      - select:
+          kind: Ingress
+          name: backfriend-idp
+        fieldPaths:
+          - spec.rules.0.host
+          - spec.tls.0.hosts.0
+
+# Pin newTag to a released sha-<7 chars> tag for anything you rely on.
+images:
+  - name: ghcr.io/sturgeontechnologies/backfriend
+    newTag: main

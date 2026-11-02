@@ -36,3 +36,6 @@ yarn-error.log*
 
 # AWS
 .aws-sam/
+deploy/compose/.env
+deploy/compose/data/
+backend/onprem/dist-test/

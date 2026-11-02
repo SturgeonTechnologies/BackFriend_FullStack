@@ -184,7 +184,7 @@ delete the line, when they're done.
       `loginWithFacebook` + a Login button on the frontend. Manual steps before it
       works: create a Meta app, store `/schuit-sharing/prod/facebook/{client_id,client_secret}`
       in SSM, `serverless deploy --stage prod`, register the `/oauth2/idpresponse`
-      redirect URI in the Facebook app, and flip the app to Live. See README step 1/5.
+      redirect URI in the Facebook app, and flip the app to Live. See docs/cloud/deployment.md step 1/5.
 
 - [x] **SES production access GRANTED (2026-07-28).** Requested via
       `aws sesv2 put-account-details --production-access-enabled

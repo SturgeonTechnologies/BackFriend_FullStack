@@ -1,0 +1,32 @@
+# deploy/kubernetes with test values: run-kubernetes.sh fills in NFS_SERVER.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: backfriend
+resources:
+  - ../../kubernetes
+  - smtp-sink.yml
+  - ../smtp
+configMapGenerator:
+  - name: backfriend-site
+    behavior: merge
+    literals:
+      - SITE_HOST=sharing.test
+      - SITE_ORIGIN=https://sharing.test
+      - KC_HOSTNAME=https://sharing.test/idp
+      - OIDC_ISSUER=https://sharing.test/idp/realms/backfriend
+images:
+  - name: ghcr.io/sturgeontechnologies/backfriend
+    newName: backfriend
+    newTag: e2e
+patches:
+  - target: { kind: Deployment, name: backfriend }
+    patch: |
+      - { op: replace, path: /spec/template/spec/containers/0/imagePullPolicy, value: Never }
+  - target: { kind: PersistentVolume, name: backfriend-data }
+    patch: |
+      - { op: replace, path: /spec/nfs/server, value: NFS_SERVER }
+      - { op: replace, path: /spec/nfs/path, value: /srv/nfs/sharing_schuit_io/data }
+  - target: { kind: PersistentVolume, name: backfriend-config }
+    patch: |
+      - { op: replace, path: /spec/nfs/server, value: NFS_SERVER }
+      - { op: replace, path: /spec/nfs/path, value: /srv/nfs/sharing_schuit_io/config }

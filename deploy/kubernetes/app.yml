@@ -1,0 +1,85 @@
+# The API and web app, in one process. One replica: the public-link rate limit is
+# held in memory, and a restart only costs a few seconds.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backfriend
+  labels: { app: backfriend }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: backfriend }
+  template:
+    metadata:
+      labels: { app: backfriend }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # Owner of the share. See storage.yml.
+        runAsNonRoot: true
+        runAsUser: 99
+        runAsGroup: 100
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: ghcr.io/sturgeontechnologies/backfriend
+          imagePullPolicy: Always
+          env:
+            - name: SITE_ORIGIN
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: SITE_ORIGIN } }
+            - name: APP_DISPLAY_NAME
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: APP_DISPLAY_NAME } }
+            - name: OIDC_ISSUER
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: OIDC_ISSUER } }
+            # Fetched over the cluster network, so sign-in checks don't depend on public DNS.
+            - { name: OIDC_JWKS_URL, value: "http://keycloak:8080/idp/realms/backfriend/protocol/openid-connect/certs" }
+            - { name: OIDC_CLIENT_IDS, value: backfriend-web }
+            - name: GOOGLE_ENABLED
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: GOOGLE_ENABLED } }
+            - name: FACEBOOK_ENABLED
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: FACEBOOK_ENABLED } }
+            - { name: TRUSTED_PROXY_HOPS, value: "1" }
+            - name: APP_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: APP_DB_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://backfriend:$(APP_DB_PASSWORD)@postgres:5432/backfriend" }
+            - name: FILE_SIGNING_KEY
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: FILE_SIGNING_KEY } }
+            - name: BOOTSTRAP_ADMIN_EMAILS
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: BOOTSTRAP_ADMIN_EMAILS } }
+            - name: SMTP_URL
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: SMTP_URL } }
+            - name: MAIL_FROM
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: SMTP_FROM } }
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data/content }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: backfriend-data }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backfriend
+spec:
+  selector: { app: backfriend }
+  ports:
+    - { name: http, port: 8080, targetPort: http }

@@ -2,16 +2,16 @@
 // Guided setup for a new deployment of this app. Walks through creating
 // backend/deploy.config.<name>.json and (optionally) running the deploy,
 // then (if you gave a domain) offers to deploy the frontend hosting stack
-// (README step 4) and the SES email stack (README step 4b) too.
+// (docs/cloud/deployment.md step 4) and the SES email stack (docs/cloud/deployment.md step 4b) too.
 //
-// This is a CONVENIENCE WRAPPER around README.md's numbered steps 1-4b, not
+// This is a CONVENIENCE WRAPPER around docs/cloud/deployment.md's numbered steps 1-4b, not
 // a replacement for them -- it automates the repetitive/mechanical parts
 // (bucket creation, SSM parameter writes, assembling the JSON config, the
 // CloudFormation deploys for steps 4/4b) but skips the genuinely manual bits
 // (creating OAuth clients in Google/Facebook's own consoles, and custom
 // domains for the API/Cognito Hosted UI) on purpose, since those need real
 // human judgment or a console only you control, and the Cognito custom
-// domain swap is disruptive to sign-in besides. See README.md for exactly
+// domain swap is disruptive to sign-in besides. See docs/cloud/deployment.md for exactly
 // what each step does and the raw commands, in case something here doesn't
 // fit your setup or you'd rather run it by hand.
 //
@@ -257,7 +257,7 @@ function cfnDeploy(stackName, templateFile, region, params) {
 async function main() {
   console.log("Guided deployment setup");
   console.log("========================");
-  console.log("Automates README.md steps 1-4b's mechanical parts: bucket");
+  console.log("Automates docs/cloud/deployment.md steps 1-4b's mechanical parts: bucket");
   console.log("creation, SSM parameter writes, assembling");
   console.log("deploy.config.<name>.json, and (if you give a domain) the");
   console.log("frontend hosting (step 4) and SES (step 4b) CloudFormation");
@@ -266,14 +266,14 @@ async function main() {
   console.log("domains for the API/Cognito Hosted UI -- those need a");
   console.log("console only you control, or (for Cognito) are disruptive");
   console.log("enough to sign-in that they shouldn't happen as a side");
-  console.log("effect of a routine setup run. See README.md for those.");
+  console.log("effect of a routine setup run. See docs/cloud/deployment.md for those.");
   console.log("\nEvery prompt below can be preset with a --flag or env var");
   console.log("for repeat/test runs -- see the file header for the full list.\n");
 
   console.log("Checking prerequisites...");
   const missing = ["aws", "sam", "node"].filter((c) => !have(c));
   if (missing.length) {
-    console.error(`Missing: ${missing.join(", ")}. See README.md "Requirements".`);
+    console.error(`Missing: ${missing.join(", ")}. See docs/cloud/deployment.md "Requirements".`);
     process.exit(1);
   }
   console.log("  OK: aws, sam, node all found.\n");
@@ -311,7 +311,7 @@ async function main() {
   const sharesBucket = await ask("S3 bucket to store shared files in (created if missing)", spaceName, presetValue("shares-bucket", "SHARES_BUCKET"));
   const adminEmail = await ask("Admin email (bootstrapped as admin on first sign-in)", undefined, presetValue("admin-email", "ADMIN_EMAIL"));
   const domain = await ask(
-    "Public domain for the SPA (leave blank to skip for now -- you can add it later, see README step 4)",
+    "Public domain for the SPA (leave blank to skip for now -- you can add it later, see docs/cloud/deployment.md step 4)",
     undefined,
     presetValue("domain", "DOMAIN"),
   );
@@ -333,7 +333,7 @@ async function main() {
 
   const oauth = {};
   console.log("\nOAuth sign-in (optional -- skip for email/password-only; you can add these later by editing the config and redeploying).");
-  if (await askYesNo("Set up Google sign-in now? (you need a Client ID/Secret already created -- see README step 1)", false, presetBool("google"))) {
+  if (await askYesNo("Set up Google sign-in now? (you need a Client ID/Secret already created -- see docs/cloud/deployment.md step 1)", false, presetBool("google"))) {
     const clientId = await ask("  Google Client ID", undefined, presetValue("google-client-id", "GOOGLE_CLIENT_ID"));
     const clientSecret = await ask("  Google Client Secret", undefined, presetValue("google-client-secret", "GOOGLE_CLIENT_SECRET"));
     const idParam = `/${spaceName}/${stage}/google/client_id`;
@@ -342,7 +342,7 @@ async function main() {
     run("aws", ["ssm", "put-parameter", "--name", secretParam, "--type", "SecureString", "--value", clientSecret, "--overwrite", "--region", region]);
     oauth.google = { clientIdSsmParam: idParam, clientSecretSsmParam: secretParam };
   }
-  if (await askYesNo("Set up Facebook sign-in now? (you need an App ID/Secret already created -- see README step 1)", false, presetBool("facebook"))) {
+  if (await askYesNo("Set up Facebook sign-in now? (you need an App ID/Secret already created -- see docs/cloud/deployment.md step 1)", false, presetBool("facebook"))) {
     const clientId = await ask("  Facebook App ID", undefined, presetValue("facebook-client-id", "FACEBOOK_CLIENT_ID"));
     const clientSecret = await ask("  Facebook App Secret", undefined, presetValue("facebook-client-secret", "FACEBOOK_CLIENT_SECRET"));
     const idParam = `/${spaceName}/${stage}/facebook/client_id`;
@@ -390,7 +390,7 @@ async function main() {
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`\n==> Wrote ${configPath}`);
 
-  console.log("\nStill manual either way (see README.md \"Custom domains\"):");
+  console.log("\nStill manual either way (see docs/cloud/deployment.md \"Custom domains\"):");
   console.log("  - Custom domains for the API/Cognito Hosted UI");
   if (!domain) {
     console.log("  - You skipped a domain, so this deploys backend-only for now (no 'frontend' block, no steps 4/4b).");
@@ -418,7 +418,7 @@ async function main() {
       if (!zoneId) {
         console.log(`\nNo hosted zone found for ${parentZone}. Create one first:`);
         console.log(`  aws route53 create-hosted-zone --name ${parentZone} --caller-reference "$(date +%s)"`);
-        console.log("then re-run this script, or see README.md step 4.");
+        console.log("then re-run this script, or see docs/cloud/deployment.md step 4.");
       } else {
         const frontendStack = `${spaceName}-frontend`;
         console.log(`\n==> Deploying ${frontendStack} to us-east-1 (CloudFront/ACM can take 15-30+ min to fully propagate)`);
@@ -447,7 +447,7 @@ async function main() {
         }
       }
     } else {
-      console.log("Skipped -- run infrastructure/deploy.sh, or see README.md step 4, when ready.");
+      console.log("Skipped -- run infrastructure/deploy.sh, or see docs/cloud/deployment.md step 4, when ready.");
     }
 
     console.log("\n---\nStep 4b: SES (invite emails)");
@@ -456,7 +456,7 @@ async function main() {
       const parentZone = await ask("Parent Route 53 hosted zone", domain, presetValue("parent-zone", "PARENT_ZONE"));
       const zoneId = hostedZoneIdFor(parentZone);
       if (!zoneId) {
-        console.log(`\nNo hosted zone found for ${parentZone}. See README.md step 4b.`);
+        console.log(`\nNo hosted zone found for ${parentZone}. See docs/cloud/deployment.md step 4b.`);
       } else {
         const emailStack = `${spaceName}-email`;
         console.log(`\n==> Deploying ${emailStack} to us-east-1`);
@@ -483,7 +483,7 @@ async function main() {
         }
       }
     } else {
-      console.log("Skipped -- run infrastructure/email-deploy.sh, or see README.md step 4b, when ready.");
+      console.log("Skipped -- run infrastructure/email-deploy.sh, or see docs/cloud/deployment.md step 4b, when ready.");
     }
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuth } from "../lib/auth";
+import { SS_DENIED, useAuth } from "../lib/auth";
 import { getPublicConfig } from "../lib/api";
 
 export default function Login() {
@@ -13,6 +13,11 @@ export default function Login() {
   // showing a button that dead-ends at a Cognito error.
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [facebookEnabled, setFacebookEnabled] = useState(false);
+  const [denied] = useState(() => {
+    const message = sessionStorage.getItem(SS_DENIED);
+    sessionStorage.removeItem(SS_DENIED);
+    return message;
+  });
 
   useEffect(() => {
     getPublicConfig()
@@ -35,6 +40,7 @@ export default function Login() {
   return (
     <div className="card" style={{ maxWidth: 440, margin: "3rem auto", textAlign: "center" }}>
       <h2>Welcome</h2>
+      {denied && <p className="err">{denied}</p>}
       <p className="muted" style={{ marginBottom: "1.5rem" }}>
         Access is invite-only. Sign in with the email address your invite was sent to —
         use {[googleEnabled && "Google", facebookEnabled && "Facebook", "email + password"].filter(Boolean).join(", ")}.
@@ -80,8 +86,8 @@ export default function Login() {
       </button>
       <p className="muted" style={{ marginTop: "0.75rem", fontSize: 13 }}>
         First time with a password? Choose <strong>Sign in with email</strong>, then
-        <strong> Sign up</strong> on the next screen. You'll get a one-time code to
-        verify your address.
+        {import.meta.env.VITE_OIDC_ISSUER_PATH ? <strong> Register</strong> : <strong> Sign up</strong>} on the next screen.
+        You'll get {import.meta.env.VITE_OIDC_ISSUER_PATH ? "an email" : "a one-time code"} to verify your address.
       </p>
       <p className="muted" style={{ marginTop: "1.25rem", fontSize: 12 }}>
         <a href="/privacy.html">Privacy Policy</a>

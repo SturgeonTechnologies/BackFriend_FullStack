@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 # Long-form notes are in YAML comments below (not subject to CFN's 1024-char
-# Description limit) and in ../README.md "4b. Deploy the SES email stack".
+# Description limit) and in docs/cloud/deployment.md "4b. Deploy the SES email stack".
 #
 # Coexistence with Google Workspace on schuit.io:
 #   - DKIM uses unique SES selector subdomains; doesn't collide with

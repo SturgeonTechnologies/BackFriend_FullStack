@@ -3,8 +3,17 @@ import { challengeFromVerifier, randomState, randomVerifier } from "./pkce";
 
 const COGNITO_DOMAIN = import.meta.env.VITE_COGNITO_DOMAIN;
 const CLIENT_ID = import.meta.env.VITE_USER_POOL_CLIENT_ID;
-const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI;
-const LOGOUT_REDIRECT = import.meta.env.VITE_LOGOUT_REDIRECT;
+// Set only by the on-prem image build. Everything there is same-origin, so one
+// image works on any domain. Unset (the cloud build) means Cognito, as before.
+const OIDC_ISSUER_PATH = import.meta.env.VITE_OIDC_ISSUER_PATH;
+const IS_OIDC = !!OIDC_ISSUER_PATH;
+const API_BASE = import.meta.env.VITE_API_BASE as string;
+const REDIRECT_URI = IS_OIDC ? `${window.location.origin}/auth/callback` : import.meta.env.VITE_REDIRECT_URI;
+const LOGOUT_REDIRECT = IS_OIDC ? `${window.location.origin}/login` : import.meta.env.VITE_LOGOUT_REDIRECT;
+const AUTHORIZE_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/auth` : `${COGNITO_DOMAIN}/oauth2/authorize`;
+const TOKEN_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/token` : `${COGNITO_DOMAIN}/oauth2/token`;
+const LOGOUT_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/logout` : `${COGNITO_DOMAIN}/logout`;
+export const SS_DENIED = "rh_denied";
 
 const SS_VERIFIER = "rh_pkce_verifier";
 const SS_STATE = "rh_oauth_state";
@@ -107,8 +116,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       code_challenge: challenge,
       state,
     });
-    if (identityProvider) params.set("identity_provider", identityProvider);
-    window.location.assign(`${COGNITO_DOMAIN}/oauth2/authorize?${params.toString()}`);
+    if (identityProvider) {
+      if (IS_OIDC) params.set("kc_idp_hint", identityProvider.toLowerCase());
+      else params.set("identity_provider", identityProvider);
+    }
+    window.location.assign(`${AUTHORIZE_URL}?${params.toString()}`);
   }, []);
 
   const loginWithGoogle = useCallback(
@@ -127,13 +139,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    const idToken = loadTokens()?.idToken;
     clearTokens();
     setTokens(null);
-    const params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      logout_uri: LOGOUT_REDIRECT,
-    });
-    window.location.assign(`${COGNITO_DOMAIN}/logout?${params.toString()}`);
+    const params = new URLSearchParams(
+      IS_OIDC
+        ? { client_id: CLIENT_ID, post_logout_redirect_uri: LOGOUT_REDIRECT, ...(idToken ? { id_token_hint: idToken } : {}) }
+        : { client_id: CLIENT_ID, logout_uri: LOGOUT_REDIRECT },
+    );
+    window.location.assign(`${LOGOUT_URL}?${params.toString()}`);
   }, []);
 
   const handleCallback = useCallback(async (): Promise<string | null> => {
@@ -156,7 +170,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       code_verifier: verifier,
     });
 
-    const res = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
+    const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
@@ -190,21 +204,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [tokens],
   );
 
+  // On-prem, group membership lives in the app's database rather than the token,
+  // and the API can refuse a valid token (no invite, disabled). Ask it. This only
+  // decides what the UI shows; the API enforces access on every request.
+  const [serverGroups, setServerGroups] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!IS_OIDC || !tokens) {
+      setServerGroups(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE}/me`, { headers: { Authorization: `Bearer ${tokens.idToken}` } })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setServerGroups(((await res.json()) as { groups: string[] }).groups);
+        } else if (res.status === 403) {
+          // Signed in, but not allowed in. Sign out of the identity provider too,
+          // so the person can try a different account.
+          sessionStorage.setItem(SS_DENIED, ((await res.json()) as { error: string }).error);
+          logout();
+        } else if (res.status === 401) {
+          clearTokens();
+          setTokens(null);
+        } else {
+          setServerGroups([]);
+        }
+      })
+      .catch(() => { if (!cancelled) setServerGroups([]); });
+    return () => { cancelled = true; };
+  }, [tokens, logout]);
+
+  const groups = IS_OIDC ? serverGroups ?? [] : claims?.["cognito:groups"] ?? [];
+
   const value = useMemo<AuthState>(
     () => ({
       email: claims?.email ?? null,
       name: claims?.name ?? null,
-      groups: claims?.["cognito:groups"] ?? [],
-      isAdmin: (claims?.["cognito:groups"] ?? []).includes("admins"),
+      groups,
+      isAdmin: groups.includes("admins"),
       idToken: tokens?.idToken ?? null,
-      loading,
+      loading: loading || (IS_OIDC && !!tokens && serverGroups === null),
       loginWithGoogle,
       loginWithFacebook,
       loginWithEmail,
       logout,
       handleCallback,
     }),
-    [claims, tokens, loading, loginWithGoogle, loginWithFacebook, loginWithEmail, logout, handleCallback],
+    [claims, groups, serverGroups, tokens, loading, loginWithGoogle, loginWithFacebook, loginWithEmail, logout, handleCallback],
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

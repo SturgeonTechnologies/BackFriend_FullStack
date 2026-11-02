@@ -1,0 +1,151 @@
+# BackFriend on one host. Start with docs/onprem/compose.md.
+name: backfriend
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "5" }
+
+services:
+  proxy:
+    <<: *hardening
+    image: caddy:2.10-alpine
+    depends_on: [app, keycloak]
+    cap_add: [NET_BIND_SERVICE]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_HOST:?set SITE_HOST in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${BACKFRIEND_DIR:?set BACKFRIEND_DIR in .env}/config/caddy/data:/data
+      - ${BACKFRIEND_DIR}/config/caddy/config:/config
+    networks: [edge]
+
+  app:
+    <<: *hardening
+    image: ${BACKFRIEND_IMAGE:-ghcr.io/sturgeontechnologies/backfriend:latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    environment:
+      SITE_ORIGIN: https://${SITE_HOST}
+      APP_DISPLAY_NAME: ${APP_DISPLAY_NAME:-BackFriend}
+      DATABASE_URL: postgres://backfriend:${APP_DB_PASSWORD:?run gen-secrets.sh}@postgres:5432/backfriend
+      FILE_SIGNING_KEY: ${FILE_SIGNING_KEY:?run gen-secrets.sh}
+      OIDC_ISSUER: https://${SITE_HOST}/idp/realms/backfriend
+      # Fetched over the private network, so sign-in checks don't leave the host.
+      OIDC_JWKS_URL: http://keycloak:8080/idp/realms/backfriend/protocol/openid-connect/certs
+      OIDC_CLIENT_IDS: backfriend-web
+      BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:?set BOOTSTRAP_ADMIN_EMAILS in .env}
+      GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      FACEBOOK_ENABLED: ${FACEBOOK_ENABLED:-false}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${SMTP_FROM:-}
+      TRUSTED_PROXY_HOPS: "1"
+    volumes:
+      - ${BACKFRIEND_DIR:?set BACKFRIEND_DIR in .env}/data:/data/content
+    networks: [edge, backend]
+
+  keycloak:
+    <<: *hardening
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start", "--import-realm"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?run gen-secrets.sh}
+      KC_HOSTNAME: https://${SITE_HOST}/idp
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HOSTNAME_ADMIN: http://localhost:8081/idp
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /idp
+      KC_HTTP_MANAGEMENT_RELATIVE_PATH: /
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run gen-secrets.sh}
+      SITE_ORIGIN: https://${SITE_HOST}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST in .env}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM in .env}
+      SMTP_AUTH: ${SMTP_AUTH:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    volumes:
+      - ../keycloak/realm-backfriend.json:/opt/keycloak/data/import/realm-backfriend.json:ro
+      - ../keycloak/configure-optional.sh:/opt/keycloak/configure-optional.sh:ro
+    # The admin console is only reachable from the host itself (see authentication.md).
+    ports:
+      - "127.0.0.1:8081:8080"
+    healthcheck:
+      # The image has no curl. Bash's /dev/tcp checks the management port's readiness route.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks: [edge, backend]
+
+  postgres:
+    restart: unless-stopped
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run gen-secrets.sh}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - ${BACKFRIEND_DIR}/config/postgres:/var/lib/postgresql/data
+      - ../postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+
+  backup:
+    restart: unless-stopped
+    image: postgres:17-alpine
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${BACKFRIEND_DIR}/config/backups:/backups
+    # Nightly dumps of both databases, keeping 14 days.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while :; do
+          sleep 86400
+          for db in backfriend keycloak; do
+            pg_dump -h postgres -U postgres -Fc "$$db" > "/backups/$$db-$$(date +%F).dump.tmp" \
+              && mv "/backups/$$db-$$(date +%F).dump.tmp" "/backups/$$db-$$(date +%F).dump"
+          done
+          find /backups -name '*.dump' -mtime +14 -delete
+        done
+    networks: [backend]
+
+networks:
+  edge: {}
+  # No route out: Postgres can't reach the internet, and nothing outside this file can reach it.
+  backend:
+    internal: true

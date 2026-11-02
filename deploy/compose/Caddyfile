@@ -1,0 +1,18 @@
+# TLS and routing for the Compose deployment. Mirrors the Kubernetes Ingress: only
+# the paths sign-in needs reach Keycloak. Its admin console, the master realm, the
+# account console and client registration aren't on the internet.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	request_body /idp/* {
+		max_size 1MB
+	}
+	@keycloak path /idp/realms/backfriend/.well-known/* /idp/realms/backfriend/protocol/* /idp/realms/backfriend/login-actions/* /idp/realms/backfriend/broker/* /idp/resources/*
+	handle @keycloak {
+		reverse_proxy keycloak:8080
+	}
+	handle {
+		reverse_proxy app:8080 {
+			flush_interval -1
+		}
+	}
+}

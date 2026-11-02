@@ -1,0 +1,100 @@
+name: On-prem
+
+on:
+  pull_request:
+    paths:
+      - "backend/onprem/**"
+      - "backend/src/**"
+      - "frontend/**"
+      - "deploy/**"
+      - ".dockerignore"
+      - ".github/workflows/onprem.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/onprem/**"
+      - "backend/src/**"
+      - "frontend/**"
+      - "deploy/**"
+      - ".dockerignore"
+      - ".github/workflows/onprem.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Backend dependencies
+        run: npm ci
+        working-directory: backend
+      - name: On-prem typecheck and tests
+        working-directory: backend/onprem
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Web app, cloud build (Cognito)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Web app, on-prem build (OIDC)
+        working-directory: frontend
+        env:
+          VITE_API_BASE: /api
+          VITE_OIDC_ISSUER_PATH: /idp/realms/backfriend
+          VITE_USER_POOL_CLIENT_ID: backfriend-web
+        run: npm run build
+
+  # Complete deployments, following the docs, tested through their public URL.
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: deploy/test/run-compose.sh
+
+  kubernetes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - run: deploy/test/run-kubernetes.sh
+
+  image:
+    if: github.event_name != 'pull_request'
+    needs: [test, compose, kubernetes]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/sturgeontechnologies/backfriend:main
+            ghcr.io/sturgeontechnologies/backfriend:sha-${{ steps.sha.outputs.short }}
