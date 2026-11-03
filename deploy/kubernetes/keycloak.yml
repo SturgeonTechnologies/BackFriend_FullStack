@@ -32,9 +32,12 @@ spec:
             - name: KC_HOSTNAME
               valueFrom: { configMapKeyRef: { name: backfriend-site, key: KC_HOSTNAME } }
             - { name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true" }
-            - { name: KC_HOSTNAME_ADMIN, value: "http://localhost:8081/idp" }
+            - name: KC_HTTP_RELATIVE_PATH
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: KC_HTTP_RELATIVE_PATH } }
+            - { name: KC_HOSTNAME_ADMIN, value: "http://localhost:8081$(KC_HTTP_RELATIVE_PATH)" }
+            # Where configure-optional.sh reaches Keycloak from inside this container.
+            - { name: KC_URL, value: "http://localhost:8080$(KC_HTTP_RELATIVE_PATH)" }
             - { name: KC_HTTP_ENABLED, value: "true" }
-            - { name: KC_HTTP_RELATIVE_PATH, value: /idp }
             - { name: KC_HTTP_MANAGEMENT_RELATIVE_PATH, value: / }
             - { name: KC_PROXY_HEADERS, value: xforwarded }
             - { name: KC_HEALTH_ENABLED, value: "true" }

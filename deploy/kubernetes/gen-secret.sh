@@ -4,7 +4,7 @@
 # It never overwrites an existing Secret: changing POSTGRES_PASSWORD or a database
 # password here wouldn't change it inside Postgres, and would lock the services out.
 set -eu
-NS=backfriend
+NS=${NS:-backfriend}
 : "${BOOTSTRAP_ADMIN_EMAILS:?the email address of the first admin}"
 : "${SMTP_HOST:?your mail server}"
 : "${SMTP_FROM:?the address mail comes from}"

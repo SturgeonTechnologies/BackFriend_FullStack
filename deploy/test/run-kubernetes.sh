@@ -11,10 +11,13 @@ K="kubectl"
 sudo apt-get update -qq
 sudo apt-get install -y -qq nfs-kernel-server
 # One exported share with config/ and data/ inside, mounted by subdirectory like Unraid.
-sudo mkdir -p /srv/nfs/sharing_schuit_io/data /srv/nfs/sharing_schuit_io/config
+sudo mkdir -p /srv/nfs/sharing_schuit_io/data /srv/nfs/sharing_schuit_io/config \
+  /srv/nfs/rileyschuit_com_bros/data /srv/nfs/rileyschuit_com_bros/config
 sudo chown -R 99:100 /srv/nfs
 sudo chmod -R 775 /srv/nfs
-echo '/srv/nfs/sharing_schuit_io *(rw,sync,no_subtree_check,insecure,all_squash,anonuid=99,anongid=100)' | sudo tee /etc/exports
+for share in sharing_schuit_io rileyschuit_com_bros; do
+  echo "/srv/nfs/$share *(rw,sync,no_subtree_check,insecure,all_squash,anonuid=99,anongid=100)"
+done | sudo tee /etc/exports
 sudo exportfs -ra
 sudo systemctl restart nfs-kernel-server
 
@@ -25,8 +28,10 @@ kind load docker-image backfriend:e2e --name backfriend
 
 dump() {
   $K get pods,pv,pvc,ingress,certificate -A -o wide || true
-  $K -n backfriend describe pods || true
-  for d in backfriend keycloak postgres; do $K -n backfriend logs "deploy/$d" --tail=60 || true; done
+  for ns in backfriend backfriend-bros; do
+    $K -n "$ns" describe pods || true
+    for d in backfriend keycloak postgres; do $K -n "$ns" logs "deploy/$d" --tail=60 || true; done
+  done
 }
 trap dump ERR
 
@@ -75,3 +80,37 @@ $K -n backfriend run np-check --image=node:22-alpine --restart=Never \
   --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np-check","image":"node:22-alpine","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}},"command":["node","-e","fetch(\"http://keycloak:8080/idp/\",{signal:AbortSignal.timeout(5000)}).then(()=>process.exit(1),()=>process.exit(0))"]}]}}'
 $K -n backfriend wait pod/np-check --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s
 echo "kubernetes: network policy blocks what it should"
+
+# ----- The second install: https://www.rileyschuit.com/bros, on its own share -----
+NS=backfriend-bros BOOTSTRAP_ADMIN_EMAILS=bros-admin@e2e.test SMTP_HOST=smtp-sink SMTP_PORT=1025 SMTP_FROM=noreply@e2e.test \
+  SMTP_AUTH=false SMTP_STARTTLS=false SMTP_URL=smtp://smtp-sink:1025 ../../kubernetes/gen-secret.sh
+kustomize build ../k8s-bros | sed "s/NFS_SERVER/$NFS_SERVER/" | $K apply -f -
+B="$K -n backfriend-bros"
+$B rollout status deploy/postgres --timeout=300s
+$B rollout status deploy/keycloak --timeout=420s
+$B rollout status deploy/backfriend --timeout=180s
+$B wait certificate/backfriend-tls --for=condition=Ready --timeout=120s
+$B wait certificate/rileyschuit-com-tls --for=condition=Ready --timeout=120s
+
+echo '127.0.0.1 www.rileyschuit.com rileyschuit.com' | sudo tee -a /etc/hosts
+$B port-forward svc/smtp-sink 1081:1080 >/dev/null 2>&1 &
+PF=$!
+sleep 3
+BASE=https://www.rileyschuit.com/bros SINK=http://127.0.0.1:1081 ADMIN_EMAIL=bros-admin@e2e.test NODE_TLS_REJECT_UNAUTHORIZED=0 \
+  node ../e2e.mjs
+kill $PF
+
+# Each install's files are on its own share, and the first one was left alone.
+test -n "$(sudo find /srv/nfs/rileyschuit_com_bros/data -type f -print -quit)"
+sudo test -f /srv/nfs/rileyschuit_com_bros/config/postgres/data/PG_VERSION
+test "$(sudo find /srv/nfs/sharing_schuit_io/data -type f -newer /srv/nfs/rileyschuit_com_bros/config/postgres/data/PG_VERSION | wc -l)" = 0
+echo "kubernetes: /bros stays on its own share"
+
+# The apex redirects to www, and /bros is the only thing this install answers on www.
+for scheme in http https; do
+  got=$(curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' "$scheme://rileyschuit.com/some/path?x=1")
+  test "$got" = "301 https://www.rileyschuit.com/some/path?x=1" || { echo "apex redirect over $scheme: $got"; exit 1; }
+done
+test "$(curl -sk -o /dev/null -w '%{http_code}' https://www.rileyschuit.com/)" = 404
+test "$(curl -sk -o /dev/null -w '%{http_code}' https://www.rileyschuit.com/brosx)" = 404
+echo "kubernetes: apex redirect OK"

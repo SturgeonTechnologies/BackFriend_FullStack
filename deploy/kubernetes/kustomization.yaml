@@ -24,6 +24,10 @@ configMapGenerator:
       - SITE_ORIGIN=https://sharing.schuit.io
       - KC_HOSTNAME=https://sharing.schuit.io/idp
       - OIDC_ISSUER=https://sharing.schuit.io/idp/realms/backfriend
+      # Only change these three to serve the app under a sub-path. See deploy/overlays/rileyschuit-bros.
+      - BASE_PATH=
+      - KC_HTTP_RELATIVE_PATH=/idp
+      - OIDC_JWKS_URL=http://keycloak:8080/idp/realms/backfriend/protocol/openid-connect/certs
       - APP_DISPLAY_NAME=BackFriend
       # Set to true after running configure-optional.sh for that provider.
       - GOOGLE_ENABLED=false

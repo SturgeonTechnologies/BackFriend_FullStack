@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node build.mjs",
     "pretest": "node build.mjs --tests",
-    "test": "node --test --test-concurrency=1 dist-test/"
+    "test": "node --test --test-concurrency=1 dist-test/*.test.mjs"
   },
   "dependencies": {
     "jose": "^5.9.6",

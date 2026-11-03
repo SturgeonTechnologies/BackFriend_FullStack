@@ -1,0 +1,24 @@
+# The real /bros overlay with its real hostnames (run-kubernetes.sh points them at the
+# kind cluster). Only the image and the NFS server differ. run-kubernetes.sh fills in NFS_SERVER.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: backfriend-bros
+resources:
+  - ../../overlays/rileyschuit-bros
+  - ../smtp
+images:
+  - name: ghcr.io/sturgeontechnologies/backfriend
+    newName: backfriend
+    newTag: e2e
+patches:
+  - target: { kind: Deployment, name: backfriend }
+    patch: |
+      - { op: replace, path: /spec/template/spec/containers/0/imagePullPolicy, value: Never }
+  - target: { kind: PersistentVolume, name: backfriend-bros-data }
+    patch: |
+      - { op: replace, path: /spec/nfs/server, value: NFS_SERVER }
+      - { op: replace, path: /spec/nfs/path, value: /srv/nfs/rileyschuit_com_bros/data }
+  - target: { kind: PersistentVolume, name: backfriend-bros-config }
+    patch: |
+      - { op: replace, path: /spec/nfs/server, value: NFS_SERVER }
+      - { op: replace, path: /spec/nfs/path, value: /srv/nfs/rileyschuit_com_bros/config }

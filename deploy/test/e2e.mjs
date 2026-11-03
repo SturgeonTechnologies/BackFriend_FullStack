@@ -12,6 +12,7 @@ const SINK = process.env.SINK;
 const ADMIN = process.env.ADMIN_EMAIL;
 const PASSWORD = "correct-horse-battery-" + randomBytes(4).toString("hex");
 const CLIENT = "backfriend-web";
+const PREFIX = new URL(BASE).pathname.replace(/\/$/, "");
 const REALM = `${BASE}/idp/realms/backfriend`;
 const REDIRECT = `${BASE}/auth/callback`;
 
@@ -136,6 +137,21 @@ await step("the web app is served with security headers, and deep links fall bac
   }
 });
 
+await step("the web app loads its assets from where it's mounted", async () => {
+  const html = await (await fetch(`${BASE}/admin`)).text();
+  assert.ok(html.includes(`<base href="${PREFIX}/">`), html.slice(0, 300));
+  const script = html.match(/<script[^>]*src="([^"]+)"/)?.[1];
+  assert.ok(script && !script.startsWith("/"), `script path isn't relative: ${script}`);
+  const res = await fetch(new URL(script, `${BASE}/`));
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /javascript/);
+  if (PREFIX) {
+    const bare = await fetch(BASE, { redirect: "manual" });
+    assert.equal(bare.status, 301);
+    assert.equal(bare.headers.get("location"), `${PREFIX}/`);
+  }
+});
+
 await step("Keycloak's admin surface and master realm aren't reachable from outside", async () => {
   for (const path of ["/idp/admin/", "/idp/admin/master/console/", "/idp/admin/realms", "/idp/realms/master/.well-known/openid-configuration", "/idp/metrics", "/idp/health",
     "/idp/realms/backfriend/account/", "/idp/realms/backfriend/clients-registrations/default", "/idp/realms/backfriendx/.well-known/openid-configuration"]) {
@@ -146,7 +162,7 @@ await step("Keycloak's admin surface and master realm aren't reachable from outs
   for (const path of ["/idp/realms/backfriend/protocol/../../master/.well-known/openid-configuration", "/idp/resources/%2e%2e/realms/master/.well-known/openid-configuration", "/idp/realms/backfriend/protocol/..%2f..%2fmaster/.well-known/openid-configuration"]) {
     const status = await new Promise((resolve, reject) => {
       const u = new URL(BASE);
-      const req = (u.protocol === "https:" ? httpsRequest : httpRequest)({ host: u.hostname, port: u.port, path, servername: u.hostname, headers: { Host: u.host } }, (r) => { r.resume(); resolve(r.statusCode); });
+      const req = (u.protocol === "https:" ? httpsRequest : httpRequest)({ host: u.hostname, port: u.port, path: `${PREFIX}${path}`, servername: u.hostname, headers: { Host: u.host } }, (r) => { r.resume(); resolve(r.statusCode); });
       req.on("error", reject);
       req.end();
     });
@@ -229,7 +245,7 @@ await step("admin creates a folder and a mount; member can't see it until grante
 
 let download;
 await step("a signed upload lands in the mount and downloads back", async () => {
-  assert.equal(new URL(upload).origin, BASE);
+  assert.ok(upload.startsWith(`${BASE}/`), upload);
   assert.equal((await fetch(upload, { method: "PUT", body: "hello from e2e" })).status, 200);
   const list = await api("/browse/movies", member);
   assert.ok(JSON.stringify(list.body).includes("hello.txt"));
@@ -250,7 +266,7 @@ await step("a tampered signed link is refused", async () => {
 await step("a public link works anonymously until it's revoked", async () => {
   const res = await api("/browse/movies/public?path=hello.txt", admin, { method: "POST", body: "{}" });
   assert.equal(res.status, 200, JSON.stringify(res.body));
-  assert.equal(new URL(res.body.publicUrl).origin, BASE);
+  assert.ok(res.body.publicUrl.startsWith(`${BASE}/`), res.body.publicUrl);
   assert.equal(await (await fetch(res.body.publicUrl)).text(), "hello from e2e");
   assert.equal((await api("/browse/movies/public?path=hello.txt", admin, { method: "DELETE" })).status, 200);
   assert.equal((await fetch(res.body.publicUrl, { redirect: "manual" })).status, 404);
