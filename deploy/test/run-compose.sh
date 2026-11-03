@@ -6,6 +6,8 @@ cd "$(dirname "$0")/../compose"
 DATA=$(mktemp -d)
 mkdir -p "$DATA/data" "$DATA/config/caddy/data" "$DATA/config/caddy/config" "$DATA/config/postgres" "$DATA/config/backups"
 sudo chown -R 10001:10001 "$DATA/data"
+# Caddy runs as root with no capabilities, so it can only write to folders root owns (as in the docs).
+sudo chown -R 0:0 "$DATA/config/caddy"
 
 cp .env.example .env
 sed -i \
