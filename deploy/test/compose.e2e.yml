@@ -4,7 +4,8 @@ services:
     image: node:22-alpine
     command: ["node", "/sink.mjs"]
     volumes:
-      - ./smtp/smtp-sink.mjs:/sink.mjs:ro
+      # Relative to deploy/compose: Compose resolves paths from the first -f file.
+      - ../test/smtp/smtp-sink.mjs:/sink.mjs:ro
     ports:
       - "127.0.0.1:1080:1080"
     networks: [edge]

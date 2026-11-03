@@ -44,7 +44,7 @@ export interface Harness {
 }
 interface TokenOpts { issuer?: string; audience?: string; expiresIn?: string; key?: unknown; alg?: string }
 
-export async function startHarness(pgPort: number, adminEmail = "boss@example.com"): Promise<Harness> {
+export async function startHarness(pgPort: number, adminEmail = "boss@example.com", siteOrigin = ORIGIN): Promise<Harness> {
   const pgDir = mkdtempSync(join(tmpdir(), "bf-pg-"));
   const contentRoot = mkdtempSync(join(tmpdir(), "bf-content-"));
   const stopPg = await startPostgres(pgDir, pgPort);
@@ -54,10 +54,18 @@ export async function startHarness(pgPort: number, adminEmail = "boss@example.co
   const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
   const jwksServer: Server = createServer((_q, r) => { r.setHeader("content-type", "application/json"); r.end(JSON.stringify({ keys: [jwk] })); });
   await new Promise<void>((ok) => jwksServer.listen(0, "127.0.0.1", ok));
+  // A failed start must not leave Postgres or this server running, or the test process never exits.
+  const stopDeps = async () => {
+    jwksServer.closeAllConnections();
+    await new Promise((ok) => jwksServer.close(ok));
+    await stopPg();
+    rmSync(pgDir, { recursive: true, force: true });
+    rmSync(contentRoot, { recursive: true, force: true });
+  };
   const jwksPort = (jwksServer.address() as any).port;
 
   Object.assign(process.env, {
-    SITE_ORIGIN: ORIGIN,
+    SITE_ORIGIN: siteOrigin,
     DATABASE_URL: `postgres://postgres:pw@127.0.0.1:${pgPort}/app`,
     CONTENT_ROOT: contentRoot,
     FILE_SIGNING_KEY: "x".repeat(40),
@@ -70,7 +78,13 @@ export async function startHarness(pgPort: number, adminEmail = "boss@example.co
   });
   const { migrate, closeDb } = await import("../src/pg");
   const { startServer } = await import("../src/server");
-  await migrate();
+  try {
+    await migrate();
+  } catch (e) {
+    await closeDb().catch(() => {});
+    await stopDeps();
+    throw e;
+  }
   const server = startServer(0);
   await new Promise((ok) => server.once("listening", ok));
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -89,12 +103,8 @@ export async function startHarness(pgPort: number, adminEmail = "boss@example.co
     stop: async () => {
       server.closeAllConnections();
       await new Promise((ok) => server.close(ok));
-      jwksServer.closeAllConnections();
-      await new Promise((ok) => jwksServer.close(ok));
       await closeDb();
-      await stopPg();
-      rmSync(pgDir, { recursive: true, force: true });
-      rmSync(contentRoot, { recursive: true, force: true });
+      await stopDeps();
     },
   };
 }
