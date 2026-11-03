@@ -1,0 +1,53 @@
+# Nightly dumps of both databases to backups/ on the config share, kept for 14 days.
+# These are the copy to restore from if the live data directory is damaged. Getting
+# them, and the content share, off that server is a separate job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-backup
+spec:
+  schedule: "17 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: database-backup }
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 99
+            runAsGroup: 100
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: dump
+              image: postgres:17
+              env:
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: backfriend-secrets, key: POSTGRES_PASSWORD } }
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  mkdir -p /config/backups
+                  for db in backfriend keycloak; do
+                    file="/config/backups/$db-$(date +%F).dump"
+                    pg_dump -h postgres -U postgres -Fc "$db" > "$file.tmp"
+                    mv "$file.tmp" "$file"
+                  done
+                  find /config/backups -name '*.dump' -mtime +14 -delete
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - { name: config, mountPath: /config }
+          volumes:
+            - name: config
+              persistentVolumeClaim: { claimName: backfriend-config }

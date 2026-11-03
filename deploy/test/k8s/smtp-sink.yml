@@ -1,0 +1,74 @@
+# A throwaway mail server, plus the one extra network rule it needs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smtp-sink
+  labels: { app: smtp-sink }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: smtp-sink }
+  template:
+    metadata:
+      labels: { app: smtp-sink }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: sink
+          image: node:22-alpine
+          command: [node, /sink/smtp-sink.mjs]
+          ports:
+            - { name: smtp, containerPort: 1025 }
+            - { name: http, containerPort: 1080 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: sink, mountPath: /sink }
+      volumes:
+        - name: sink
+          configMap: { name: smtp-sink }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smtp-sink
+spec:
+  selector: { app: smtp-sink }
+  ports:
+    - { name: smtp, port: 1025, targetPort: smtp }
+    - { name: http, port: 1080, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: smtp-sink
+spec:
+  podSelector:
+    matchLabels: { app: smtp-sink }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: backfriend }
+        - podSelector:
+            matchLabels: { app: keycloak }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: to-smtp-sink
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: [backfriend, keycloak] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: smtp-sink }
+      ports:
+        - { protocol: TCP, port: 1025 }

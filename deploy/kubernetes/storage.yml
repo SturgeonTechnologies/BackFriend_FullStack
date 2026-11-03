@@ -1,0 +1,79 @@
+# One NFS share, sharing_schuit_io, with two top-level directories:
+#   data/    the shared files themselves. Mounted by the app only.
+#   config/  one directory per service: postgres/ (users, invites, mounts, public
+#            links and Keycloak's data) and backups/ (nightly database dumps).
+#
+# Each PV mounts its own directory, so the app can't see config/ and Postgres can't
+# see data/. Both directories must exist before the first deploy, or the pods stay in
+# ContainerCreating with "No such file or directory". See docs/onprem/kubernetes.md.
+# Mounts are `hard`: if the server goes away, I/O waits for it rather than handing
+# Postgres an error partway through a write.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backfriend-data
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=3
+    - nolock
+    - hard
+  nfs:
+    server: 192.168.0.33
+    path: /mnt/user/sharing_schuit_io/data
+  claimRef:
+    namespace: backfriend
+    name: backfriend-data
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backfriend-config
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=3
+    - nolock
+    - hard
+  nfs:
+    server: 192.168.0.33
+    path: /mnt/user/sharing_schuit_io/config
+  claimRef:
+    namespace: backfriend
+    name: backfriend-config
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backfriend-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: backfriend-data
+  resources:
+    requests:
+      storage: 1Ti
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backfriend-config
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: backfriend-config
+  resources:
+    requests:
+      storage: 20Gi

@@ -1,0 +1,76 @@
+# One database server, with a separate database and login for the app and Keycloak.
+# Recreate, because two copies of Postgres on one data directory corrupts it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # Matches the owner of a new share on Unraid (nobody:users). Postgres refuses
+        # to start unless its directory's owner is the user it runs as. Debian image,
+        # not Alpine: it can run as a user that isn't in /etc/passwd.
+        runAsNonRoot: true
+        runAsUser: 99
+        runAsGroup: 100
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: postgres:17
+          env:
+            - { name: POSTGRES_USER, value: postgres }
+            # Not subPath: a stale subPath mount stops a pod restarting until it's deleted.
+            - { name: PGDATA, value: /config/postgres/data }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: POSTGRES_PASSWORD } }
+            - name: APP_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: APP_DB_PASSWORD } }
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: backfriend-secrets, key: KEYCLOAK_DB_PASSWORD } }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          startupProbe:
+            exec: { command: [pg_isready, -U, postgres, -h, 127.0.0.1, -d, keycloak] }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec: { command: [pg_isready, -U, postgres, -h, 127.0.0.1, -d, keycloak] }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /config }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          persistentVolumeClaim: { claimName: backfriend-config }
+        - name: init
+          configMap: { name: postgres-init, defaultMode: 0555 }
+        - { name: run, emptyDir: { medium: Memory } }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }

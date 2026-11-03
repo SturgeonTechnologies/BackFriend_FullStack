@@ -1,0 +1,143 @@
+# Nothing talks to anything unless it's listed here. The NFS mounts are made by the
+# node, not the pods, so they aren't affected. Traefik is assumed to be in a namespace
+# called `traefik`; change the selector if yours differs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backfriend
+spec:
+  podSelector:
+    matchLabels: { app: backfriend }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: postgres }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - podSelector:
+            matchLabels: { app: keycloak }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # Invite emails. Public addresses only; see the doc if your mail server is on the LAN.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - { protocol: TCP, port: 25 }
+        - { protocol: TCP, port: 465 }
+        - { protocol: TCP, port: 587 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak
+spec:
+  podSelector:
+    matchLabels: { app: keycloak }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+        - podSelector:
+            matchLabels: { app: backfriend }
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: postgres }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    # Mail, plus HTTPS to Google and Facebook when those sign-in methods are on.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - { protocol: TCP, port: 25 }
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 465 }
+        - { protocol: TCP, port: 587 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+spec:
+  podSelector:
+    matchLabels: { app: postgres }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: backfriend }
+        - podSelector:
+            matchLabels: { app: keycloak }
+        - podSelector:
+            matchLabels: { app: database-backup }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-backup
+spec:
+  podSelector:
+    matchLabels: { app: database-backup }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: postgres }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+# cert-manager's temporary HTTP-01 solver pods run in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-solver
+spec:
+  podSelector:
+    matchLabels: { acme.cert-manager.io/http01-solver: "true" }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+      ports:
+        - { protocol: TCP, port: 8089 }

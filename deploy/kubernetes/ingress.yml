@@ -1,0 +1,61 @@
+# TLS and routing. cert-manager sees the annotation, gets a certificate from the
+# issuer and renews it. The host comes from SITE_HOST in kustomization.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backfriend
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - SITE_HOST
+      secretName: backfriend-tls
+  rules:
+    - host: SITE_HOST
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backfriend
+                port: { number: 8080 }
+---
+# Only the paths sign-in needs reach Keycloak. Its admin console, the master realm,
+# the account console and client registration aren't on the internet; the app answers
+# 404 for anything else under /idp. Sharing the TLS block above needs no second certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backfriend-idp
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: backfriend-idp-ratelimit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - SITE_HOST
+      secretName: backfriend-tls
+  rules:
+    - host: SITE_HOST
+      http:
+        paths:
+          - { path: /idp/realms/backfriend/.well-known, pathType: Prefix, backend: { service: { name: keycloak, port: { number: 8080 } } } }
+          - { path: /idp/realms/backfriend/protocol, pathType: Prefix, backend: { service: { name: keycloak, port: { number: 8080 } } } }
+          - { path: /idp/realms/backfriend/login-actions, pathType: Prefix, backend: { service: { name: keycloak, port: { number: 8080 } } } }
+          - { path: /idp/realms/backfriend/broker, pathType: Prefix, backend: { service: { name: keycloak, port: { number: 8080 } } } }
+          - { path: /idp/resources, pathType: Prefix, backend: { service: { name: keycloak, port: { number: 8080 } } } }
+---
+# Anyone can register in Keycloak (the app then refuses them without an invite), so this
+# limits how fast one address can make it send mail. Per client address.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: idp-ratelimit
+spec:
+  rateLimit:
+    average: 10
+    period: 1s
+    burst: 60

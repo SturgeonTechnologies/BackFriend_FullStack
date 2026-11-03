@@ -4,14 +4,14 @@
 # used from both this and quickstart.ps1, since hand-rolling JSON
 # generation twice in two shell dialects is a bad idea).
 #
-# See README.md for what this automates (and, more importantly, what it
-# deliberately doesn't) -- this is a convenience wrapper around README.md's
+# See docs/cloud/deployment.md for what this automates (and, more importantly, what it
+# deliberately doesn't) -- this is a convenience wrapper around docs/cloud/deployment.md's
 # numbered steps, not a replacement for reading them.
 
 set -euo pipefail
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "ERROR: node not found on PATH. See README.md \"Requirements\"." >&2
+  echo "ERROR: node not found on PATH. See docs/cloud/deployment.md \"Requirements\"." >&2
   exit 1
 fi
 

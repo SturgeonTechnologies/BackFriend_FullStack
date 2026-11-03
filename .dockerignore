@@ -1,0 +1,7 @@
+**/node_modules
+**/dist
+**/dist-test
+.git
+docs
+deploy/compose/.env
+deploy/compose/data

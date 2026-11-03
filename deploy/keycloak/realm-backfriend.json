@@ -1,0 +1,95 @@
+{
+  "realm": "backfriend",
+  "displayName": "BackFriend",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxDeltaTimeSeconds": 43200,
+  "passwordPolicy": "length(12) and notUsername and notEmail and passwordHistory(3)",
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 86400,
+  "ssoSessionMaxLifespan": 1209600,
+  "actionTokenGeneratedByUserLifespan": 1800,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'none'; object-src 'none';",
+    "strictTransportSecurity": "max-age=31536000",
+    "xContentTypeOptions": "nosniff",
+    "xFrameOptions": "DENY",
+    "referrerPolicy": "no-referrer"
+  },
+  "smtpServer": {
+    "host": "${SMTP_HOST}",
+    "port": "${SMTP_PORT}",
+    "from": "${SMTP_FROM}",
+    "fromDisplayName": "BackFriend",
+    "auth": "${SMTP_AUTH}",
+    "user": "${SMTP_USER}",
+    "password": "${SMTP_PASSWORD}",
+    "starttls": "${SMTP_STARTTLS}",
+    "ssl": "false"
+  },
+  "clients": [
+    {
+      "clientId": "backfriend-web",
+      "name": "BackFriend web app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "rootUrl": "${SITE_ORIGIN}",
+      "baseUrl": "/",
+      "redirectUris": [
+        "${SITE_ORIGIN}/auth/callback"
+      ],
+      "webOrigins": [
+        "${SITE_ORIGIN}"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${SITE_ORIGIN}/login"
+      }
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "backfriend-first-login",
+      "description": "A social sign-in only creates a new account. It never attaches to an existing one, so someone who registered an address first can't end up sharing an account with its real owner.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-create-user-if-unique",
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ]
+}

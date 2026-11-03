@@ -1,0 +1,10 @@
+# Adds a throwaway mail server for deploy/test/run-compose.sh.
+services:
+  smtp-sink:
+    image: node:22-alpine
+    command: ["node", "/sink.mjs"]
+    volumes:
+      - ./smtp/smtp-sink.mjs:/sink.mjs:ro
+    ports:
+      - "127.0.0.1:1080:1080"
+    networks: [edge]
