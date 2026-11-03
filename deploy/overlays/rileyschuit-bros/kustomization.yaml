@@ -1,0 +1,62 @@
+# A second, separate install at https://www.rileyschuit.com/bros. Same manifests and
+# image as sharing.schuit.io, but its own namespace, Keycloak, Postgres, secrets and
+# NFS share, so neither site can see the other's users or files.
+# Also redirects rileyschuit.com to www. See docs/onprem/kubernetes.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: backfriend-bros
+
+resources:
+  - ../../kubernetes
+  - apex-redirect.yml
+
+configMapGenerator:
+  - name: backfriend-site
+    behavior: merge
+    literals:
+      - SITE_HOST=www.rileyschuit.com
+      - SITE_ORIGIN=https://www.rileyschuit.com/bros
+      - KC_HOSTNAME=https://www.rileyschuit.com/bros/idp
+      - OIDC_ISSUER=https://www.rileyschuit.com/bros/idp/realms/backfriend
+      - BASE_PATH=/bros
+      - KC_HTTP_RELATIVE_PATH=/bros/idp
+      - OIDC_JWKS_URL=http://keycloak:8080/bros/idp/realms/backfriend/protocol/openid-connect/certs
+
+replacements:
+  - source: { kind: ConfigMap, name: backfriend-site, fieldPath: data.SITE_HOST }
+    targets:
+      - select: { kind: Ingress, name: backfriend }
+        fieldPaths: [spec.rules.0.host, spec.tls.0.hosts.0]
+      - select: { kind: Ingress, name: backfriend-idp }
+        fieldPaths: [spec.rules.0.host, spec.tls.0.hosts.0]
+
+patches:
+  # PVs aren't namespaced, so these need their own names and their own share.
+  - target: { kind: PersistentVolume, name: backfriend-data }
+    patch: |
+      - { op: replace, path: /metadata/name, value: backfriend-bros-data }
+      - { op: replace, path: /spec/nfs/path, value: /mnt/user/rileyschuit_com_bros/data }
+      - { op: replace, path: /spec/claimRef/namespace, value: backfriend-bros }
+  - target: { kind: PersistentVolume, name: backfriend-config }
+    patch: |
+      - { op: replace, path: /metadata/name, value: backfriend-bros-config }
+      - { op: replace, path: /spec/nfs/path, value: /mnt/user/rileyschuit_com_bros/config }
+      - { op: replace, path: /spec/claimRef/namespace, value: backfriend-bros }
+  - target: { kind: PersistentVolumeClaim, name: backfriend-data }
+    patch: |
+      - { op: replace, path: /spec/volumeName, value: backfriend-bros-data }
+  - target: { kind: PersistentVolumeClaim, name: backfriend-config }
+    patch: |
+      - { op: replace, path: /spec/volumeName, value: backfriend-bros-config }
+  # Only /bros reaches this install. The rest of www.rileyschuit.com stays free.
+  - target: { kind: Ingress, name: backfriend }
+    patch: |
+      - { op: replace, path: /spec/rules/0/http/paths/0/path, value: /bros }
+  - target: { kind: Ingress, name: backfriend-idp }
+    patch: |
+      - { op: replace, path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares, value: backfriend-bros-idp-ratelimit@kubernetescrd }
+      - { op: replace, path: /spec/rules/0/http/paths/0/path, value: /bros/idp/realms/backfriend/.well-known }
+      - { op: replace, path: /spec/rules/0/http/paths/1/path, value: /bros/idp/realms/backfriend/protocol }
+      - { op: replace, path: /spec/rules/0/http/paths/2/path, value: /bros/idp/realms/backfriend/login-actions }
+      - { op: replace, path: /spec/rules/0/http/paths/3/path, value: /bros/idp/realms/backfriend/broker }
+      - { op: replace, path: /spec/rules/0/http/paths/4/path, value: /bros/idp/resources }

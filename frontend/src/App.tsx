@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, Link } from "react-router-dom";
+import { useLocation, Routes, Route, Navigate, Link } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import Callback from "./pages/Callback";
@@ -12,8 +12,10 @@ import Profile from "./pages/Profile";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { idToken, loading } = useAuth();
+  // Relative to the app's mount point, which is what Login and Callback expect.
+  const location = useLocation();
   if (loading) return <p style={{ padding: "2rem" }}>Loading…</p>;
-  if (!idToken) return <Navigate to={`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`} replace />;
+  if (!idToken) return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   return <>{children}</>;
 }
 

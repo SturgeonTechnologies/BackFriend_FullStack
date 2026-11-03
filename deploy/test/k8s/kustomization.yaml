@@ -4,7 +4,6 @@ kind: Kustomization
 namespace: backfriend
 resources:
   - ../../kubernetes
-  - smtp-sink.yml
   - ../smtp
 configMapGenerator:
   - name: backfriend-site
@@ -18,6 +17,14 @@ images:
   - name: ghcr.io/sturgeontechnologies/backfriend
     newName: backfriend
     newTag: e2e
+# The host in the base was filled in when it was built, so set it again from the values above.
+replacements:
+  - source: { kind: ConfigMap, name: backfriend-site, fieldPath: data.SITE_HOST }
+    targets:
+      - select: { kind: Ingress, name: backfriend }
+        fieldPaths: [spec.rules.0.host, spec.tls.0.hosts.0]
+      - select: { kind: Ingress, name: backfriend-idp }
+        fieldPaths: [spec.rules.0.host, spec.tls.0.hosts.0]
 patches:
   - target: { kind: Deployment, name: backfriend }
     patch: |

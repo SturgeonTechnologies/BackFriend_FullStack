@@ -24,7 +24,7 @@ const SPA_CSP = [
   "object-src 'self'",
   "frame-src 'self'",
   "frame-ancestors 'none'",
-  "base-uri 'none'",
+  "base-uri 'self'",
   "form-action 'self'",
 ].join("; ");
 
@@ -162,6 +162,17 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, path: string
   }
 }
 
+// The web app is built with relative asset paths, and this tag tells it where it's
+// mounted, so one image works at the root of a domain or under a sub-path.
+let cachedHtml: { file: string; html: string } | undefined;
+async function appHtml(file: string): Promise<string> {
+  if (cachedHtml?.file !== file) {
+    const html = await fs.readFile(file, "utf8");
+    cachedHtml = { file, html: html.replace("<head>", `<head><base href="${config().basePath}/">`) };
+  }
+  return cachedHtml.html;
+}
+
 async function handleStatic(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
   const root = config().staticRoot;
   if (!root || !["GET", "HEAD"].includes(req.method ?? "")) return json(res, 404, { error: "Not found" });
@@ -182,26 +193,39 @@ async function handleStatic(req: IncomingMessage, res: ServerResponse, path: str
   }
 
   const isHtml = target.endsWith(".html");
+  const isApp = target === join(root, "index.html");
   res.writeHead(200, {
     "Content-Type": STATIC_TYPES[extname(target)] ?? "application/octet-stream",
     "Content-Security-Policy": SPA_CSP,
     "Cache-Control": isHtml ? "no-cache" : target.includes(`${sep}assets${sep}`) ? "public, max-age=31536000, immutable" : "public, max-age=3600",
   });
   if (req.method === "HEAD") return void res.end();
+  if (isApp) return void res.end(await appHtml(target));
   createReadStream(target).on("error", () => res.destroy()).pipe(res);
 }
 
 export async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   const url = new URL(req.url ?? "/", "http://internal");
-  const path = url.pathname;
+  let path = url.pathname;
 
   try {
+    // Probes call the pod directly, so these two stay at the root.
     if (path === "/healthz") return json(res, 200, { ok: true });
     if (path === "/readyz") {
       await db().query("SELECT 1");
       await fs.access(config().contentRoot);
       return json(res, 200, { ok: true });
+    }
+
+    const { basePath } = config();
+    if (basePath) {
+      if (path === basePath) {
+        res.writeHead(301, { Location: `${basePath}/${url.search}` });
+        return void res.end();
+      }
+      if (!path.startsWith(`${basePath}/`)) return json(res, 404, { error: "Not found" });
+      path = path.slice(basePath.length);
     }
 
     if (path.startsWith("/files/")) {

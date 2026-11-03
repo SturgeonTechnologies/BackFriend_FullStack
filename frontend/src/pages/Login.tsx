@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { SS_DENIED, useAuth } from "../lib/auth";
 import { getPublicConfig } from "../lib/api";
+import { BASE_PATH } from "../lib/basePath";
 
 export default function Login() {
   const { loginWithGoogle, loginWithFacebook, loginWithEmail, idToken } = useAuth();
@@ -31,7 +32,7 @@ export default function Login() {
   }, []);
 
   if (idToken) {
-    window.location.replace(returnTo);
+    window.location.replace(`${BASE_PATH}${returnTo}`);
     return null;
   }
 
@@ -90,7 +91,7 @@ export default function Login() {
         You'll get {import.meta.env.VITE_OIDC_ISSUER_PATH ? "an email" : "a one-time code"} to verify your address.
       </p>
       <p className="muted" style={{ marginTop: "1.25rem", fontSize: 12 }}>
-        <a href="/privacy.html">Privacy Policy</a>
+        <a href={`${BASE_PATH}/privacy.html`}>Privacy Policy</a>
       </p>
     </div>
   );

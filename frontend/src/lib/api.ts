@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_BASE as string;
+import { withBase } from "./basePath";
+
+const API_BASE = withBase(import.meta.env.VITE_API_BASE as string);
 
 async function request<T>(
   path: string,

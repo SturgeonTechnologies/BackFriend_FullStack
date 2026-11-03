@@ -34,7 +34,8 @@ const common = {
   format: "esm",
   sourcemap: true,
   plugins: [swapAwsModules],
-  external: ["pg-native"],
+  // Optional imports in pg that a Node server never reaches, and that --omit=optional leaves out.
+  external: ["pg-native", "pg-cloudflare"],
   banner: {
     js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
   },

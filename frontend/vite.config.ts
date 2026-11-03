@@ -9,6 +9,8 @@ export default defineConfig(({ mode }) => {
   const appTitle = env.VITE_APP_TITLE || "Schuit Sharing";
 
   return {
+    // On-prem assets are relative, so the app can be mounted under a sub-path. See basePath.ts.
+    base: env.VITE_OIDC_ISSUER_PATH ? "./" : "/",
     plugins: [
       react(),
       {

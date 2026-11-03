@@ -1,15 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { BASE_PATH, withBase } from "./basePath";
 import { challengeFromVerifier, randomState, randomVerifier } from "./pkce";
 
 const COGNITO_DOMAIN = import.meta.env.VITE_COGNITO_DOMAIN;
 const CLIENT_ID = import.meta.env.VITE_USER_POOL_CLIENT_ID;
 // Set only by the on-prem image build. Everything there is same-origin, so one
 // image works on any domain. Unset (the cloud build) means Cognito, as before.
-const OIDC_ISSUER_PATH = import.meta.env.VITE_OIDC_ISSUER_PATH;
-const IS_OIDC = !!OIDC_ISSUER_PATH;
-const API_BASE = import.meta.env.VITE_API_BASE as string;
-const REDIRECT_URI = IS_OIDC ? `${window.location.origin}/auth/callback` : import.meta.env.VITE_REDIRECT_URI;
-const LOGOUT_REDIRECT = IS_OIDC ? `${window.location.origin}/login` : import.meta.env.VITE_LOGOUT_REDIRECT;
+const IS_OIDC = !!import.meta.env.VITE_OIDC_ISSUER_PATH;
+const OIDC_ISSUER_PATH = IS_OIDC ? withBase(import.meta.env.VITE_OIDC_ISSUER_PATH as string) : "";
+const API_BASE = withBase(import.meta.env.VITE_API_BASE as string);
+const REDIRECT_URI = IS_OIDC ? `${window.location.origin}${BASE_PATH}/auth/callback` : import.meta.env.VITE_REDIRECT_URI;
+const LOGOUT_REDIRECT = IS_OIDC ? `${window.location.origin}${BASE_PATH}/login` : import.meta.env.VITE_LOGOUT_REDIRECT;
 const AUTHORIZE_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/auth` : `${COGNITO_DOMAIN}/oauth2/authorize`;
 const TOKEN_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/token` : `${COGNITO_DOMAIN}/oauth2/token`;
 const LOGOUT_URL = IS_OIDC ? `${OIDC_ISSUER_PATH}/protocol/openid-connect/logout` : `${COGNITO_DOMAIN}/logout`;

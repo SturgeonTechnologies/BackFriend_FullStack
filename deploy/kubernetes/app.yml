@@ -33,8 +33,11 @@ spec:
               valueFrom: { configMapKeyRef: { name: backfriend-site, key: APP_DISPLAY_NAME } }
             - name: OIDC_ISSUER
               valueFrom: { configMapKeyRef: { name: backfriend-site, key: OIDC_ISSUER } }
+            - name: BASE_PATH
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: BASE_PATH } }
             # Fetched over the cluster network, so sign-in checks don't depend on public DNS.
-            - { name: OIDC_JWKS_URL, value: "http://keycloak:8080/idp/realms/backfriend/protocol/openid-connect/certs" }
+            - name: OIDC_JWKS_URL
+              valueFrom: { configMapKeyRef: { name: backfriend-site, key: OIDC_JWKS_URL } }
             - { name: OIDC_CLIENT_IDS, value: backfriend-web }
             - name: GOOGLE_ENABLED
               valueFrom: { configMapKeyRef: { name: backfriend-site, key: GOOGLE_ENABLED } }

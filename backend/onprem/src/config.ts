@@ -10,7 +10,10 @@ function list(name: string): string[] {
 
 export interface Config {
   port: number;
+  /** The public address of this install, including any sub-path. No trailing slash. */
   siteOrigin: string;
+  /** The sub-path it's served under, such as /bros. Empty at the root of a domain. */
+  basePath: string;
   appName: string;
   databaseUrl: string;
   contentRoot: string;
@@ -35,6 +38,9 @@ export function config(): Config {
   const signingKey = required("FILE_SIGNING_KEY");
   if (signingKey.length < 32) throw new Error("FILE_SIGNING_KEY must be at least 32 characters");
   const siteOrigin = required("SITE_ORIGIN").replace(/\/+$/, "");
+  const basePath = (process.env.BASE_PATH ?? "").replace(/\/+$/, "");
+  if (basePath && !/^(\/[A-Za-z0-9._-]+)+$/.test(basePath)) throw new Error("BASE_PATH must look like /bros");
+  if (!siteOrigin.endsWith(basePath)) throw new Error("SITE_ORIGIN must end with BASE_PATH");
   const issuer = required("OIDC_ISSUER").replace(/\/+$/, "");
   // The handlers read these two directly, and the first decides which "bucket" name is valid.
   process.env.SHARES_BUCKET ??= "content";
@@ -45,6 +51,7 @@ export function config(): Config {
   cached = {
     port: Number(process.env.PORT ?? 8080),
     siteOrigin,
+    basePath,
     appName: process.env.APP_DISPLAY_NAME ?? "BackFriend",
     databaseUrl: required("DATABASE_URL"),
     contentRoot: required("CONTENT_ROOT"),

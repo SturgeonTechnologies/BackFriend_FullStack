@@ -115,6 +115,35 @@ kubectl -n backfriend get certificate backfriend-tls -w   # want READY True
    ```
 6. Run a backup once: `kubectl -n backfriend create job backup-now --from=cronjob/database-backup`
 
+## A second, separate install under a sub-path
+
+`deploy/overlays/rileyschuit-bros` runs the same image at `https://www.rileyschuit.com/bros`, and
+redirects `rileyschuit.com` to `www.rileyschuit.com`, keeping the path. It has its own namespace
+(`backfriend-bros`), Keycloak, Postgres, secrets and NFS share, so its users and files stay separate
+from `sharing.schuit.io`. Only `/bros` is routed, so the rest of `www.rileyschuit.com` is free for
+something else and returns 404 for now.
+
+1. **Create the share** `rileyschuit_com_bros` on the file server, as in step 1:
+   ```bash
+   mkdir -p /mnt/user/rileyschuit_com_bros/config /mnt/user/rileyschuit_com_bros/data
+   chown -R nobody:users /mnt/user/rileyschuit_com_bros
+   chmod -R 775 /mnt/user/rileyschuit_com_bros
+   ```
+2. **Create its secrets.** Export the same variables as step 3, with `NS` set:
+   ```bash
+   NS=backfriend-bros deploy/kubernetes/gen-secret.sh
+   ```
+3. **Deploy:**
+   ```bash
+   kustomize build deploy/overlays/rileyschuit-bros | kubectl apply -f -
+   kubectl -n backfriend-bros rollout status deploy/postgres --timeout=5m
+   kubectl -n backfriend-bros rollout status deploy/keycloak --timeout=7m
+   kubectl -n backfriend-bros rollout status deploy/backfriend --timeout=3m
+   ```
+4. **Point DNS** for `rileyschuit.com` and `www.rileyschuit.com` at the ingress, then follow step 6
+   using `https://www.rileyschuit.com/bros`. Keycloak is at `/bros/idp`, so the admin console is at
+   `http://localhost:8081/bros/idp/admin` through the port-forward.
+
 ## Day to day
 
 - **Upgrade:** change `newTag`, then repeat step 4. The schema migrates when the app starts.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 
 export default function Callback() {
@@ -22,7 +22,7 @@ export default function Callback() {
           If you were invited and just got here, the invite may have expired or been revoked.
           Ask your admin to re-send the invite, then try again.
         </p>
-        <a href="/login">Back to sign in</a>
+        <Link to="/login">Back to sign in</Link>
       </div>
     );
   }
