@@ -13,11 +13,9 @@ before(async () => {
   writeFileSync(join(web, "index.html"), '<html><head><title>t</title></head><body><div id="root"></div></body></html>');
   writeFileSync(join(web, "assets", "a.js"), "ok");
   Object.assign(process.env, { BASE_PATH: "/bros", STATIC_ROOT: web });
-  h = await startHarness(55434);
-  process.env.SITE_ORIGIN = "https://www.example.test/bros";
-  (await import("../src/config")).resetConfigForTests();
+  h = await startHarness(55434, undefined, "https://www.example.test/bros");
 });
-after(async () => { await h.stop(); });
+after(async () => { await h?.stop(); });
 
 const get = (path: string) => fetch(`${h.base}${path}`, { redirect: "manual" });
 
