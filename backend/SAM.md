@@ -124,7 +124,8 @@ sam deploy --config-env <stage> \
 
 ## Prod cutover — DONE (2026-08-09)
 
-`sharing.schuit.io` (CloudFront `rom-hub-frontend`) now routes `/api/*` to
+`sharing.schuit.io` (CloudFront, then stack `rom-hub-frontend`; since renamed to
+`schuit-sharing-frontend`) now routes `/api/*` to
 `schuit-sharing-prod-sam`'s API (`6oweubywx9.execute-api.us-east-1.amazonaws.com`).
 The old Serverless stack (`schuit-sharing-prod`) was deleted the same day. `prod`
 deploys now mean `sam build --config-env prod && sam deploy --config-env prod`

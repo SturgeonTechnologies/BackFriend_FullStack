@@ -79,9 +79,11 @@ delete the line, when they're done.
         - [ ] Step 11: Cleanup — delete old `/rom-hub/dev/google/*`
               SSM params + remove the old `rom-hub-dev-*` Cognito
               redirect URI from the Google OAuth client.
-        - [ ] (Optional, later) Rename frontend stack
-              `rom-hub-frontend` → `schuit-sharing-frontend`. Requires
-              CloudFront re-create (~20–30 min downtime). Defer.
+        - [x] Rename frontend stack `rom-hub-frontend` →
+              `schuit-sharing-frontend`. Done — `rom-hub-frontend` no
+              longer exists; CloudFront `EV4JYSUECGGK2`
+              (`d3dlahreopabei.cloudfront.net`) is owned by
+              `schuit-sharing-frontend`.
 
       **Resume runbook (steps 4–11):**
 
@@ -148,20 +150,21 @@ delete the line, when they're done.
       # entry from the Google OAuth client's Authorized redirect URIs.
       ```
 
-      **Optional later — rename the frontend stack.** Currently
-      `rom-hub-frontend` owns CloudFront + the Route53 A-alias for
-      `sharing.schuit.io` + the ACM cert. CFN doesn't support stack
-      renames; the only path is delete + recreate. Expect ~20–30 min
-      of user-visible downtime (CloudFront propagation). The only
-      cost of leaving it is the legacy name in the AWS console.
+      **Frontend stack rename — DONE.** `rom-hub-frontend` was deleted
+      and recreated as `schuit-sharing-frontend` (owns CloudFront
+      `EV4JYSUECGGK2` / `d3dlahreopabei.cloudfront.net`, the ACM cert, and
+      the Route53 A-alias for `sharing.schuit.io`). References to
+      `rom-hub-frontend` in the steps above are historical.
+
+      **Repointing DNS after an on-prem test.** Re-running
+      `infrastructure/deploy.sh` will NOT fix a hand-edited A record —
+      CloudFormation doesn't see the drift and reports "No changes to
+      deploy". UPSERT the alias directly instead (idempotent):
 
       ```bash
-      aws cloudformation delete-stack --region us-east-1 \
-        --stack-name rom-hub-frontend
-      aws cloudformation wait stack-delete-complete --region us-east-1 \
-        --stack-name rom-hub-frontend
-      cd infrastructure && ./deploy.sh
-      # default STACK_NAME=schuit-sharing-frontend, STAGE=prod
+      CF_DOMAIN=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items && contains(Aliases.Items, 'sharing.schuit.io')].DomainName | [0]" --output text)
+      ZONE_ID=$(aws route53 list-hosted-zones-by-name --dns-name schuit.io --query "HostedZones[?Name=='schuit.io.'].Id | [0]" --output text | sed 's#/hostedzone/##')
+      aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" --change-batch "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"sharing.schuit.io.\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"Z2FDTNDATAQYW2\",\"DNSName\":\"$CF_DOMAIN\",\"EvaluateTargetHealth\":false}}}]}"
       ```
 
 - [ ] **Email/password verification uses Cognito's default sender, not SES.**

@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-STACK_NAME="${STACK_NAME:-rom-hub-frontend}"
+STACK_NAME="${STACK_NAME:-schuit-sharing-frontend}"
 REGION="${AWS_REGION:-us-east-1}"
 
 PROFILE_FLAG=""
